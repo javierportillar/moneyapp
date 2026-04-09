@@ -235,6 +235,18 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.analytics-panel {
+  background:
+    radial-gradient(circle at top right, rgba(29, 78, 216, 0.06), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.94));
+}
+
 .account-card {
   border-radius: 24px;
   padding: 18px;
@@ -340,6 +352,10 @@
 .text-link.compact {
   margin-top: 10px;
   padding: 0;
+}
+
+.text-link.danger {
+  color: #dc2626;
 }
 
 .module-segmented {
@@ -488,6 +504,196 @@
   margin: 8px 0 0;
 }
 
+.movement-summary-grid,
+.pocket-list-compact {
+  display: grid;
+  gap: 12px;
+}
+
+.movement-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.movement-filter-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr 320px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.filter-field {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.filter-field-label {
+  color: var(--title);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.filter-select-wrap {
+  position: relative;
+}
+
+.filter-field select {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 48px 0 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background:
+    linear-gradient(180deg, #ffffff, #f8fafc),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.04), rgba(29, 78, 216, 0.05));
+  color: var(--title);
+  font: inherit;
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background-image:
+    linear-gradient(180deg, #ffffff, #f8fafc),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%2363708A' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position: 0 0, right 16px center;
+  background-size: auto, 18px;
+}
+
+.filter-field select:focus {
+  outline: 0;
+  border-color: rgba(29, 78, 216, 0.42);
+  box-shadow:
+    0 0 0 4px rgba(29, 78, 216, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.movement-filter-card {
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(135deg, #0f172a, #1d4ed8);
+  color: white;
+}
+
+.movement-filter-card span,
+.movement-filter-card p,
+.movement-filter-card strong {
+  color: white;
+}
+
+.movement-filter-card strong {
+  display: block;
+  margin-top: 12px;
+  font-size: 1.8rem;
+}
+
+.movement-stat {
+  position: relative;
+  overflow: hidden;
+}
+
+.movement-stat::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+}
+
+.movement-stat.income::before {
+  background: #059669;
+}
+
+.movement-stat.expense::before {
+  background: #dc2626;
+}
+
+.movement-stat.transfer::before {
+  background: #2563eb;
+}
+
+.flow-metric-list,
+.category-analytics,
+.pocket-analytics,
+.debt-analytics {
+  display: grid;
+  gap: 16px;
+}
+
+.flow-metric {
+  display: grid;
+  gap: 10px;
+}
+
+.flow-metric-head,
+.analytics-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.flow-metric-head span,
+.analytics-row-head span {
+  color: var(--muted);
+}
+
+.flow-metric-head strong,
+.analytics-row-head strong {
+  color: var(--title);
+}
+
+.flow-bar {
+  height: 12px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.flow-bar div {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.flow-bar.income div {
+  background: linear-gradient(135deg, #059669, #34d399);
+}
+
+.flow-bar.expense div {
+  background: linear-gradient(135deg, #dc2626, #fb7185);
+}
+
+.flow-bar.transfer div {
+  background: linear-gradient(135deg, #2563eb, #60a5fa);
+}
+
+.flow-bar.debt div {
+  background: linear-gradient(135deg, #7c3aed, #a78bfa);
+}
+
+.flow-bar.neutral div {
+  background: linear-gradient(135deg, #0f172a, #475569);
+}
+
+.analytics-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.analytics-pocket-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .ledger,
 .fixed-stack,
 .category-board,
@@ -537,6 +743,43 @@
 
 .ledger-copy p {
   margin: 6px 0 0;
+}
+
+.movement-detail {
+  font-size: 0.88rem;
+  color: #8a97ad;
+}
+
+.movement-row {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.88), rgba(255, 255, 255, 0.92));
+}
+
+.movement-row.gasto {
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.06);
+}
+
+.movement-row.ingreso {
+  box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.06);
+}
+
+.movement-row.transferencia {
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.06);
+}
+
+.movement-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.movement-action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .ledger-actions {
@@ -710,6 +953,28 @@
   padding-top: 8px;
 }
 
+.compact-pocket-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.compact-pocket-row span,
+.compact-pocket-name strong {
+  color: var(--title);
+}
+
+.compact-pocket-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .account-strip.two-cols {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -780,9 +1045,12 @@
   .topbar,
   .hero-grid,
   .account-strip,
+  .analytics-grid,
   .account-strip.two-cols,
   .form-grid.two,
   .form-grid.three,
+  .movement-filter-board,
+  .movement-summary-grid,
   .category-board,
   .settings-chip-grid,
   .sidebar,
@@ -807,10 +1075,15 @@
 
   .fixed-card-side,
   .ledger-actions,
-  .debt-card-side {
+  .debt-card-side,
+  .movement-actions {
     justify-items: start;
     min-width: 100%;
     text-align: left;
+  }
+
+  .movement-action-row {
+    justify-content: flex-start;
   }
 
   .portfolio-metrics,

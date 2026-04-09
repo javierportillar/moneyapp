@@ -4,6 +4,7 @@ import './App.css'
 type PocketType = 'daily' | 'savings' | 'fixed' | 'invest'
 type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion'
 type ModuleKey = 'gasto' | 'ingreso' | 'transferencia' | 'fijos' | 'bolsillos'
+type MovementKind = 'gasto' | 'ingreso' | 'transferencia'
 
 type Pocket = {
   id: string
@@ -256,7 +257,7 @@ const moduleLabels: Record<ModuleKey, string> = {
   gasto: 'Registrar gasto',
   ingreso: 'Registrar ingreso',
   transferencia: 'Transferencia',
-  fijos: 'Gastos fijos',
+  fijos: 'Obligaciones',
   bolsillos: 'Bolsillos',
 }
 
@@ -264,7 +265,7 @@ const viewLabels: Record<ViewKey, string> = {
   resumen: 'Resumen',
   bolsillos: 'Bolsillos',
   movimientos: 'Movimientos',
-  programacion: 'Programacion',
+  programacion: 'Obligaciones',
   deudas: 'Deudas',
   configuracion: 'Configuracion',
 }
@@ -383,17 +384,20 @@ function App() {
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
 
   const [expenseForm, setExpenseForm] = useState({
+    id: '',
     description: '',
     amount: '',
     pocketId: initialState.pockets[0].id,
   })
   const [incomeForm, setIncomeForm] = useState({
+    id: '',
     title: '',
     amount: '',
     pocketId: initialState.pockets[0].id,
     recurring: true,
   })
   const [transferForm, setTransferForm] = useState({
+    id: '',
     fromPocketId: initialState.pockets[0].id,
     toPocketId: initialState.pockets[1].id,
     amount: '',
@@ -416,6 +420,13 @@ function App() {
     icon: '💼',
   })
   const [categoryForm, setCategoryForm] = useState('')
+  const [movementFilters, setMovementFilters] = useState<{
+    pocketId: string
+    kind: 'todos' | MovementKind
+  }>({
+    pocketId: 'todos',
+    kind: 'todos',
+  })
   const [debtForm, setDebtForm] = useState({
     title: '',
     totalAmount: '',
@@ -509,24 +520,33 @@ function App() {
         id: expense.id,
         date: expense.date,
         kind: 'gasto' as const,
+        source: expense.source,
+        editable: expense.source === 'manual' || expense.source === 'wallet',
+        deletable: expense.source === 'manual' || expense.source === 'wallet',
         title: expense.description,
         amount: -expense.amount,
         pocketIds: [expense.pocketId],
         meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
+        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
       })),
       ...monthIncomes.map((income) => ({
         id: income.id,
         date: income.date,
         kind: 'ingreso' as const,
+        editable: true,
+        deletable: true,
         title: income.title,
         amount: income.amount,
         pocketIds: [income.pocketId],
         meta: getPocketName(state.pockets, income.pocketId),
+        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
       })),
       ...monthTransfers.map((transfer) => ({
         id: transfer.id,
         date: transfer.date,
         kind: 'transferencia' as const,
+        editable: true,
+        deletable: true,
         title: transfer.note || 'Transferencia interna',
         amount: transfer.amount,
         pocketIds: [transfer.fromPocketId, transfer.toPocketId],
@@ -534,6 +554,7 @@ function App() {
           state.pockets,
           transfer.toPocketId,
         )}`,
+        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
       })),
     ]
 
@@ -546,6 +567,106 @@ function App() {
     () => activity.filter((item) => item.pocketIds.includes(selectedPocketId)),
     [activity, selectedPocketId],
   )
+
+  const filteredActivity = useMemo(() => {
+    return activity
+      .filter((item) => {
+        const matchesPocket =
+          movementFilters.pocketId === 'todos' || item.pocketIds.includes(movementFilters.pocketId)
+        const matchesKind = movementFilters.kind === 'todos' || item.kind === movementFilters.kind
+        return matchesPocket && matchesKind
+      })
+      .map((item) => {
+        if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
+          return item
+        }
+
+        const transfer = state.transfers.find((entry) => entry.id === item.id)
+        if (!transfer) return item
+
+        const isOutgoing = transfer.fromPocketId === movementFilters.pocketId
+        const signedAmount = isOutgoing ? -transfer.amount : transfer.amount
+        const transferPocketName = isOutgoing
+          ? getPocketName(state.pockets, transfer.toPocketId)
+          : getPocketName(state.pockets, transfer.fromPocketId)
+
+        return {
+          ...item,
+          amount: signedAmount,
+          detail: isOutgoing
+            ? `Salida por transferencia hacia ${transferPocketName}`
+            : `Entrada por transferencia desde ${transferPocketName}`,
+        }
+      })
+  }, [activity, movementFilters, state.pockets, state.transfers])
+
+  const movementSummary = useMemo(() => {
+    const inflow = filteredActivity
+      .filter((item) => item.amount > 0)
+      .reduce((sum, item) => sum + item.amount, 0)
+    const outflow = filteredActivity
+      .filter((item) => item.amount < 0)
+      .reduce((sum, item) => sum + Math.abs(item.amount), 0)
+    const transfers = filteredActivity.filter((item) => item.kind === 'transferencia').length
+
+    return {
+      inflow,
+      outflow,
+      transfers,
+      count: filteredActivity.length,
+    }
+  }, [filteredActivity])
+
+  const summaryAnalytics = useMemo(() => {
+    const maxFlowBase = Math.max(
+      totals.totalIncomes,
+      totals.totalExpenses,
+      totals.pendingDebt,
+      1,
+    )
+
+    const categoryBreakdown = state.categories
+      .map((category) => {
+        const total = monthExpenses
+          .filter((expense) => expense.category === category)
+          .reduce((sum, expense) => sum + expense.amount, 0)
+
+        return {
+          category,
+          total,
+          ratio: totals.totalExpenses > 0 ? total / totals.totalExpenses : 0,
+        }
+      })
+      .filter((item) => item.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+
+    const pocketBreakdown = state.pockets
+      .map((pocket) => ({
+        id: pocket.id,
+        name: pocket.name,
+        icon: pocket.icon,
+        color: pocket.color,
+        balance: pocketBalances[pocket.id] ?? 0,
+      }))
+      .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
+
+    const debtBreakdown = activeDebts.map((debt) => {
+      const paidAmount = debt.totalAmount - debt.remainingAmount
+      return {
+        ...debt,
+        paidAmount,
+        ratio: debt.totalAmount > 0 ? paidAmount / debt.totalAmount : 0,
+      }
+    })
+
+    return {
+      maxFlowBase,
+      categoryBreakdown,
+      pocketBreakdown,
+      debtBreakdown,
+    }
+  }, [activeDebts, monthExpenses, pocketBalances, state.categories, state.pockets, totals])
 
   const coachingMessage = useMemo(() => {
     if (fixedStatus.overdue.length > 0) {
@@ -571,6 +692,35 @@ function App() {
 
   function resetPocketForm() {
     setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: '💼' })
+  }
+
+  function resetExpenseForm() {
+    setExpenseForm({
+      id: '',
+      description: '',
+      amount: '',
+      pocketId: initialState.pockets[0].id,
+    })
+  }
+
+  function resetIncomeForm() {
+    setIncomeForm({
+      id: '',
+      title: '',
+      amount: '',
+      pocketId: initialState.pockets[0].id,
+      recurring: true,
+    })
+  }
+
+  function resetTransferForm() {
+    setTransferForm({
+      id: '',
+      fromPocketId: initialState.pockets[0].id,
+      toPocketId: initialState.pockets[1].id,
+      amount: '',
+      note: '',
+    })
   }
 
   function resetFixedForm() {
@@ -614,30 +764,106 @@ function App() {
     })
   }
 
+  function startEditMovement(kind: MovementKind, movementId: string) {
+    setActiveView('movimientos')
+    setActiveModule(kind)
+
+    if (kind === 'gasto') {
+      const expense = state.expenses.find((item) => item.id === movementId)
+      if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return
+
+      setExpenseForm({
+        id: expense.id,
+        description: expense.description,
+        amount: String(expense.amount),
+        pocketId: expense.pocketId,
+      })
+      return
+    }
+
+    if (kind === 'ingreso') {
+      const income = state.incomes.find((item) => item.id === movementId)
+      if (!income) return
+
+      setIncomeForm({
+        id: income.id,
+        title: income.title,
+        amount: String(income.amount),
+        pocketId: income.pocketId,
+        recurring: income.recurring,
+      })
+      return
+    }
+
+    const transfer = state.transfers.find((item) => item.id === movementId)
+    if (!transfer) return
+
+    setTransferForm({
+      id: transfer.id,
+      fromPocketId: transfer.fromPocketId,
+      toPocketId: transfer.toPocketId,
+      amount: String(transfer.amount),
+      note: transfer.note,
+    })
+  }
+
+  function handleDeleteMovement(kind: MovementKind, movementId: string) {
+    setState((current) => {
+      if (kind === 'gasto') {
+        const expense = current.expenses.find((item) => item.id === movementId)
+        if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return current
+
+        return {
+          ...current,
+          expenses: current.expenses.filter((item) => item.id !== movementId),
+        }
+      }
+
+      if (kind === 'ingreso') {
+        return {
+          ...current,
+          incomes: current.incomes.filter((item) => item.id !== movementId),
+        }
+      }
+
+      return {
+        ...current,
+        transfers: current.transfers.filter((item) => item.id !== movementId),
+      }
+    })
+
+    if (expenseForm.id === movementId) resetExpenseForm()
+    if (incomeForm.id === movementId) resetIncomeForm()
+    if (transferForm.id === movementId) resetTransferForm()
+  }
+
   function handleAddExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const numericAmount = Number(expenseForm.amount)
     if (!expenseForm.description.trim() || numericAmount <= 0) return
 
     setState((current) => {
+      const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
       const expense: Expense = {
-        id: crypto.randomUUID(),
+        id: expenseForm.id || crypto.randomUUID(),
         description: expenseForm.description.trim(),
         amount: numericAmount,
         pocketId: expenseForm.pocketId,
-        date: today,
-        source: 'manual',
+        date: currentExpense?.date ?? today,
+        source: currentExpense?.source ?? 'manual',
         category: suggestion.category,
         confidence: suggestion.confidence,
       }
 
       return {
         ...current,
-        expenses: [expense, ...current.expenses],
+        expenses: expenseForm.id
+          ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
+          : [expense, ...current.expenses],
       }
     })
 
-    setExpenseForm((current) => ({ ...current, description: '', amount: '' }))
+    resetExpenseForm()
   }
 
   function handleAddIncome(event: React.FormEvent<HTMLFormElement>) {
@@ -646,22 +872,25 @@ function App() {
     if (!incomeForm.title.trim() || numericAmount <= 0) return
 
     setState((current) => {
+      const currentIncome = current.incomes.find((item) => item.id === incomeForm.id)
       const income: Income = {
-        id: crypto.randomUUID(),
+        id: incomeForm.id || crypto.randomUUID(),
         title: incomeForm.title.trim(),
         amount: numericAmount,
         pocketId: incomeForm.pocketId,
-        date: today,
+        date: currentIncome?.date ?? today,
         recurring: incomeForm.recurring,
       }
 
       return {
         ...current,
-        incomes: [income, ...current.incomes],
+        incomes: incomeForm.id
+          ? current.incomes.map((item) => (item.id === incomeForm.id ? income : item))
+          : [income, ...current.incomes],
       }
     })
 
-    setIncomeForm((current) => ({ ...current, title: '', amount: '' }))
+    resetIncomeForm()
   }
 
   function handleAddTransfer(event: React.FormEvent<HTMLFormElement>) {
@@ -677,22 +906,25 @@ function App() {
     }
 
     setState((current) => {
+      const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
       const transfer: Transfer = {
-        id: crypto.randomUUID(),
+        id: transferForm.id || crypto.randomUUID(),
         fromPocketId: transferForm.fromPocketId,
         toPocketId: transferForm.toPocketId,
         amount: numericAmount,
-        date: today,
+        date: currentTransfer?.date ?? today,
         note: transferForm.note.trim(),
       }
 
       return {
         ...current,
-        transfers: [transfer, ...current.transfers],
+        transfers: transferForm.id
+          ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
+          : [transfer, ...current.transfers],
       }
     })
 
-    setTransferForm((current) => ({ ...current, amount: '', note: '' }))
+    resetTransferForm()
   }
 
   function handleAddFixedExpense(event: React.FormEvent<HTMLFormElement>) {
@@ -965,7 +1197,12 @@ function App() {
             <strong>{suggestion.category}</strong>
             <p>Confianza estimada: {Math.round(suggestion.confidence * 100)}%</p>
           </div>
-          <button type="submit">Registrar salida</button>
+          <button type="submit">{expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}</button>
+          {expenseForm.id && (
+            <button type="button" className="secondary-button" onClick={resetExpenseForm}>
+              Cancelar edicion
+            </button>
+          )}
         </form>
       )
     }
@@ -1013,7 +1250,12 @@ function App() {
             />
             <span>Marcar como ingreso recurrente</span>
           </label>
-          <button type="submit">Registrar ingreso</button>
+          <button type="submit">{incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}</button>
+          {incomeForm.id && (
+            <button type="button" className="secondary-button" onClick={resetIncomeForm}>
+              Cancelar edicion
+            </button>
+          )}
         </form>
       )
     }
@@ -1068,7 +1310,14 @@ function App() {
               />
             </label>
           </div>
-          <button type="submit">Ejecutar transferencia</button>
+          <button type="submit">
+            {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
+          </button>
+          {transferForm.id && (
+            <button type="button" className="secondary-button" onClick={resetTransferForm}>
+              Cancelar edicion
+            </button>
+          )}
         </form>
       )
     }
@@ -1282,6 +1531,133 @@ function App() {
               <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
             </article>
           ))}
+        </section>
+
+        <section className="analytics-grid">
+          <article className="panel banking-panel analytics-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Flujo</span>
+                <h2>Lectura financiera</h2>
+              </div>
+            </div>
+            <div className="flow-metric-list">
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Ingresos del mes</span>
+                  <strong>{money.format(totals.totalIncomes)}</strong>
+                </div>
+                <div className="flow-bar income">
+                  <div style={{ width: `${(totals.totalIncomes / summaryAnalytics.maxFlowBase) * 100}%` }} />
+                </div>
+              </div>
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Gastos del mes</span>
+                  <strong>{money.format(totals.totalExpenses)}</strong>
+                </div>
+                <div className="flow-bar expense">
+                  <div style={{ width: `${(totals.totalExpenses / summaryAnalytics.maxFlowBase) * 100}%` }} />
+                </div>
+              </div>
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Deuda pendiente</span>
+                  <strong>{money.format(totals.pendingDebt)}</strong>
+                </div>
+                <div className="flow-bar debt">
+                  <div style={{ width: `${(totals.pendingDebt / summaryAnalytics.maxFlowBase) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Categorias</span>
+                <h2>Distribucion del gasto</h2>
+              </div>
+            </div>
+            <div className="category-analytics">
+              {summaryAnalytics.categoryBreakdown.map((item) => (
+                <div key={item.category} className="analytics-row">
+                  <div className="analytics-row-head">
+                    <span>{item.category}</span>
+                    <strong>{money.format(item.total)}</strong>
+                  </div>
+                  <div className="flow-bar neutral">
+                    <div style={{ width: `${item.ratio * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+              {summaryAnalytics.categoryBreakdown.length === 0 && (
+                <p className="empty-copy">Todavia no hay gasto suficiente para dibujar categorias.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Bolsillos</span>
+                <h2>Distribucion del saldo</h2>
+              </div>
+            </div>
+            <div className="pocket-analytics">
+              {summaryAnalytics.pocketBreakdown.map((item) => {
+                const maxPocketBase = Math.max(
+                  ...summaryAnalytics.pocketBreakdown.map((entry) => Math.abs(entry.balance)),
+                  1,
+                )
+
+                return (
+                  <div key={item.id} className="analytics-row">
+                    <div className="analytics-row-head">
+                      <span className="analytics-pocket-name">
+                        <span className="icon-badge inline" style={{ background: item.color }}>
+                          {item.icon}
+                        </span>
+                        {item.name}
+                      </span>
+                      <strong>{money.format(item.balance)}</strong>
+                    </div>
+                    <div className={item.balance >= 0 ? 'flow-bar income' : 'flow-bar expense'}>
+                      <div style={{ width: `${(Math.abs(item.balance) / maxPocketBase) * 100}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Deudas</span>
+                <h2>Amortizacion activa</h2>
+              </div>
+            </div>
+            <div className="debt-analytics">
+              {summaryAnalytics.debtBreakdown.map((debt) => (
+                <div key={debt.id} className="analytics-row">
+                  <div className="analytics-row-head">
+                    <span>{debt.title}</span>
+                    <strong>{money.format(debt.remainingAmount)}</strong>
+                  </div>
+                  <div className="flow-bar debt">
+                    <div style={{ width: `${debt.ratio * 100}%` }} />
+                  </div>
+                  <p className="movement-detail">
+                    Pagado {money.format(debt.paidAmount)} de {money.format(debt.totalAmount)}
+                  </p>
+                </div>
+              ))}
+              {summaryAnalytics.debtBreakdown.length === 0 && (
+                <p className="empty-copy">No hay deudas activas para analizar.</p>
+              )}
+            </div>
+          </article>
         </section>
 
         <section className="dashboard-grid">
@@ -1567,27 +1943,131 @@ function App() {
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Libro mayor</span>
-                <h2>Todos los movimientos del mes</h2>
+                <span className="micro-label">Filtro operativo</span>
+                <h2>Consulta por bolsillo y tipo</h2>
               </div>
-              <p>{activity.length} registros</p>
+              <p>{movementSummary.count} resultado(s)</p>
+            </div>
+            <div className="movement-filter-board">
+              <div className="filter-field">
+                <span className="filter-field-label">Bolsillo</span>
+                <div className="filter-select-wrap">
+                  <select
+                    value={movementFilters.pocketId}
+                    onChange={(event) =>
+                      setMovementFilters((current) => ({ ...current, pocketId: event.target.value }))
+                    }
+                  >
+                    <option value="todos">Todos los bolsillos</option>
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="filter-field">
+                <span className="filter-field-label">Tipo de movimiento</span>
+                <div className="filter-select-wrap">
+                  <select
+                    value={movementFilters.kind}
+                    onChange={(event) =>
+                      setMovementFilters((current) => ({
+                        ...current,
+                        kind: event.target.value as 'todos' | MovementKind,
+                      }))
+                    }
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="gasto">Gastos</option>
+                    <option value="ingreso">Ingresos</option>
+                    <option value="transferencia">Transferencias</option>
+                  </select>
+                </div>
+              </div>
+              <div className="movement-filter-card">
+                <span>Filtro activo</span>
+                <strong>
+                  {movementFilters.pocketId === 'todos'
+                    ? 'Vista global'
+                    : getPocketName(state.pockets, movementFilters.pocketId)}
+                </strong>
+                <p>
+                  {movementFilters.kind === 'todos'
+                    ? 'Todos los tipos'
+                    : `Solo ${movementFilters.kind}`}
+                </p>
+              </div>
+            </div>
+            <div className="movement-summary-grid">
+              <div className="summary-box movement-stat income">
+                <span>Entradas filtradas</span>
+                <strong>{money.format(movementSummary.inflow)}</strong>
+              </div>
+              <div className="summary-box movement-stat expense">
+                <span>Salidas filtradas</span>
+                <strong>{money.format(movementSummary.outflow)}</strong>
+              </div>
+              <div className="summary-box movement-stat transfer">
+                <span>Transferencias</span>
+                <strong>{movementSummary.transfers}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel banking-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Libro mayor</span>
+                <h2>Detalle de movimientos</h2>
+              </div>
+              <p>{filteredActivity.length} registros visibles</p>
             </div>
             <div className="ledger">
-              {activity.map((item) => (
-                <article key={item.kind + item.id} className="ledger-row">
+              {filteredActivity.map((item) => (
+                <article key={item.kind + item.id} className={`ledger-row movement-row ${item.kind}`}>
                   <div className={`ledger-icon ${item.kind}`}></div>
                   <div className="ledger-copy">
                     <strong>{item.title}</strong>
                     <p>
                       {item.date} · {item.meta}
                     </p>
+                    <p className="movement-detail">{item.detail}</p>
                   </div>
-                  <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                    {item.amount >= 0 ? '+' : '-'}
-                    {money.format(Math.abs(item.amount))}
-                  </strong>
+                  <div className="movement-actions">
+                    <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+                      {item.amount >= 0 ? '+' : '-'}
+                      {money.format(Math.abs(item.amount))}
+                    </strong>
+                    {(item.editable || item.deletable) && (
+                      <div className="movement-action-row">
+                        {item.editable && (
+                          <button
+                            type="button"
+                            className="text-link compact"
+                            onClick={() => startEditMovement(item.kind, item.id)}
+                          >
+                            Editar
+                          </button>
+                        )}
+                        {item.deletable && (
+                          <button
+                            type="button"
+                            className="text-link compact danger"
+                            onClick={() => handleDeleteMovement(item.kind, item.id)}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </article>
               ))}
+              {filteredActivity.length === 0 && (
+                <p className="empty-copy">No hay movimientos con los filtros seleccionados.</p>
+              )}
             </div>
           </section>
         </div>
@@ -1613,6 +2093,28 @@ function App() {
               ))}
             </div>
             {renderActiveForm()}
+          </section>
+
+          <section className="panel banking-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Lectura rapida</span>
+                <h2>Saldo por bolsillo</h2>
+              </div>
+            </div>
+            <div className="pocket-list-compact">
+              {state.pockets.map((pocket) => (
+                <article key={pocket.id} className="compact-pocket-row">
+                  <div className="compact-pocket-name">
+                    <span className="icon-badge inline" style={{ background: pocket.color }}>
+                      {pocket.icon}
+                    </span>
+                    <strong>{pocket.name}</strong>
+                  </div>
+                  <span>{money.format(pocketBalances[pocket.id] ?? 0)}</span>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section className="panel banking-panel">
@@ -1663,7 +2165,7 @@ function App() {
             <div className="panel-header">
               <div>
                 <span className="micro-label">Calendario financiero</span>
-                <h2>Pagos y programaciones</h2>
+                <h2>Obligaciones</h2>
               </div>
               <p>{fixedStatus.pending.length} pendientes este mes</p>
             </div>
@@ -1708,8 +2210,8 @@ function App() {
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Nueva programacion</span>
-                <h2>{fixedForm.id ? 'Editar obligacion' : 'Agregar gasto fijo'}</h2>
+                <span className="micro-label">Nueva obligacion</span>
+                <h2>{fixedForm.id ? 'Editar obligacion' : 'Agregar obligacion'}</h2>
               </div>
             </div>
             <div className="module-segmented">
@@ -2052,7 +2554,7 @@ function App() {
         : activeView === 'movimientos'
           ? 'Historial operativo y registro rapido'
           : activeView === 'programacion'
-            ? 'Control de pagos fijos y programaciones'
+            ? 'Control de obligaciones y pagos recurrentes'
             : activeView === 'deudas'
               ? 'Seguimiento de deudas hasta saldo cero'
             : 'Categorias y parametros generales de la aplicacion'
@@ -2102,7 +2604,7 @@ function App() {
           </div>
           <div className="topbar-meta">
             <div className="meta-chip">
-              <span>Fijos pendientes</span>
+              <span>Obligaciones pendientes</span>
               <strong>{money.format(totals.pendingFixed)}</strong>
             </div>
             <div className="meta-chip dark">
