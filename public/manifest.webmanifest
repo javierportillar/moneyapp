@@ -1,0 +1,17 @@
+{
+  "name": "FinPilot",
+  "short_name": "FinPilot",
+  "description": "Gestiona bolsillos, gastos y pagos con una interfaz lista para movil.",
+  "theme_color": "#172033",
+  "background_color": "#f8fafc",
+  "display": "standalone",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
