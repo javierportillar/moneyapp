@@ -1,0 +1,70 @@
+{
+  "debts": [],
+  "config": {
+    "locale": "es-CO",
+    "appName": "FinPilot",
+    "currency": "COP",
+    "paydayStartDay": 1,
+    "pocketTypeLabels": {
+      "daily": "Cuenta operativa",
+      "fixed": "Debitos y pagos",
+      "invest": "Meta o inversion",
+      "savings": "Reserva y liquidez"
+    }
+  },
+  "incomes": [],
+  "pockets": [
+    {
+      "id": "p1",
+      "icon": "💼",
+      "name": "Bancoomeva",
+      "type": "daily",
+      "color": "#ff0000",
+      "balance": 0
+    },
+    {
+      "id": "p2",
+      "icon": "🛡️",
+      "name": "Rappi CA",
+      "type": "savings",
+      "color": "#ff00d0",
+      "balance": 0
+    },
+    {
+      "id": "p3",
+      "icon": "💳",
+      "name": "Nequi",
+      "type": "fixed",
+      "color": "#f6cdf9",
+      "balance": 0
+    },
+    {
+      "id": "p4",
+      "icon": "💰",
+      "name": "Efectivo",
+      "type": "invest",
+      "color": "#99ff00",
+      "balance": 0
+    }
+  ],
+  "expenses": [],
+  "transfers": [],
+  "categories": [
+    "Hogar",
+    "Comida",
+    "Transporte",
+    "Salud",
+    "Entretenimiento",
+    "Suscripciones",
+    "Ahorro",
+    "Inversion",
+    "Educacion",
+    "Servicios",
+    "Compras",
+    "Otros"
+  ],
+  "debtPayments": [],
+  "fixedExpenses": [],
+  "learningRules": [],
+  "monthClosures": []
+}

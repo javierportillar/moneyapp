@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { usePersistentSnapshot } from './hooks/usePersistentSnapshot'
+import { useSimpleUsersAuth } from './hooks/useSimpleUsersAuth'
+import { createSupabaseFinanceDriver } from './services/supabaseFinance'
+import { supabase } from './services/supabaseClient'
 
 type PocketType = 'daily' | 'savings' | 'fixed' | 'invest'
 type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion'
 type ModuleKey = 'gasto' | 'ingreso' | 'transferencia' | 'fijos' | 'bolsillos'
 type MovementKind = 'gasto' | 'ingreso' | 'transferencia'
+type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas'
 
 type Pocket = {
   id: string
@@ -38,6 +43,14 @@ type Debt = {
   pocketId: string
   category: Category
   active: boolean
+}
+
+type DebtPayment = {
+  id: string
+  debtId: string
+  amount: number
+  date: string
+  kind: 'scheduled' | 'extra'
 }
 
 type Income = {
@@ -76,11 +89,18 @@ type LearningRule = {
   hits: number
 }
 
+type MonthClosure = {
+  monthKey: string
+  closedAt: string
+  income: number
+  expense: number
+  netFlow: number
+  pocketBalance: number
+  pendingDebt: number
+  pendingFixed: number
+}
+
 type AppConfig = {
-  appName: string
-  currency: string
-  locale: string
-  paydayStartDay: number
   pocketTypeLabels: Record<PocketType, string>
 }
 
@@ -91,6 +111,8 @@ type AppState = {
   transfers: Transfer[]
   fixedExpenses: FixedExpense[]
   debts: Debt[]
+  debtPayments: DebtPayment[]
+  monthClosures: MonthClosure[]
   learningRules: LearningRule[]
   categories: Category[]
   config: AppConfig
@@ -135,119 +157,20 @@ const initialState: AppState = {
     { id: 'p3', name: 'Pagos fijos', balance: 0, color: '#f59e0b', icon: '🧾', type: 'fixed' },
     { id: 'p4', name: 'Meta viaje', balance: 0, color: '#7c3aed', icon: '✈️', type: 'invest' },
   ],
-  fixedExpenses: [
-    {
-      id: 'f1',
-      title: 'Arriendo',
-      amount: 1300000,
-      dueDay: 5,
-      confirmationDay: 6,
-      pocketId: 'p3',
-      category: 'Hogar',
-      active: true,
-      lastPaidMonth: '2026-04',
-    },
-    {
-      id: 'f2',
-      title: 'Internet + celular',
-      amount: 184000,
-      dueDay: 12,
-      confirmationDay: 13,
-      pocketId: 'p3',
-      category: 'Servicios',
-      active: true,
-    },
-    {
-      id: 'f3',
-      title: 'Notion + iCloud',
-      amount: 78000,
-      dueDay: 16,
-      confirmationDay: 17,
-      pocketId: 'p3',
-      category: 'Suscripciones',
-      active: true,
-    },
-  ],
-  debts: [
-    {
-      id: 'd1',
-      title: 'Credito laptop',
-      totalAmount: 2400000,
-      remainingAmount: 1600000,
-      installmentAmount: 400000,
-      dueDay: 25,
-      pocketId: 'p1',
-      category: 'Compras',
-      active: true,
-    },
-  ],
-  incomes: [
-    {
-      id: 'i1',
-      title: 'Nomina abril',
-      amount: 5200000,
-      pocketId: 'p1',
-      date: '2026-04-01',
-      recurring: true,
-    },
-  ],
-  transfers: [
-    {
-      id: 't1',
-      fromPocketId: 'p1',
-      toPocketId: 'p2',
-      amount: 400000,
-      date: '2026-04-02',
-      note: 'Reserva quincena',
-    },
-  ],
-  expenses: [
-    {
-      id: 'e1',
-      description: 'Uber aeropuerto',
-      amount: 48000,
-      pocketId: 'p1',
-      date: '2026-04-06',
-      source: 'wallet',
-      category: 'Transporte',
-      confidence: 0.94,
-    },
-    {
-      id: 'e2',
-      description: 'Carulla mercado semanal',
-      amount: 168000,
-      pocketId: 'p1',
-      date: '2026-04-05',
-      source: 'wallet',
-      category: 'Comida',
-      confidence: 0.91,
-    },
-    {
-      id: 'e3',
-      description: 'Notion plan team',
-      amount: 58000,
-      pocketId: 'p3',
-      date: '2026-04-03',
-      source: 'manual',
-      category: 'Suscripciones',
-      confidence: 0.9,
-    },
-  ],
-  learningRules: [
-    { keyword: 'carulla', category: 'Comida', hits: 3 },
-    { keyword: 'uber', category: 'Transporte', hits: 4 },
-    { keyword: 'notion', category: 'Suscripciones', hits: 2 },
-  ],
+  fixedExpenses: [],
+  debts: [],
+  debtPayments: [],
+  monthClosures: [],
+  incomes: [],
+  transfers: [],
+  expenses: [],
+  learningRules: [],
   categories: [...defaultCategories],
   config: {
-    appName: 'FinPilot',
-    currency: 'COP',
-    locale: 'es-CO',
-    paydayStartDay: 1,
     pocketTypeLabels: {
-      daily: 'Cuenta operativa',
-      savings: 'Reserva y liquidez',
-      fixed: 'Debitos y pagos',
+      daily: 'Operacion',
+      savings: 'Ahorro',
+      fixed: 'Pagos fijos',
       invest: 'Meta o inversion',
     },
   },
@@ -286,6 +209,12 @@ function formatDateISO(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
+function getMonthKeyFromOffset(monthKey: string, offset: number) {
+  const [year, month] = monthKey.split('-').map(Number)
+  const date = new Date(year, month - 1 + offset, 1)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
 function normalize(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
@@ -299,10 +228,12 @@ function tokenize(text: string) {
 function predictCategory(description: string, rules: LearningRule[]) {
   const text = normalize(description)
   const scores = new Map<Category, number>()
+  const matches = new Set<string>()
 
   rules.forEach((rule) => {
     if (text.includes(rule.keyword)) {
       scores.set(rule.category, (scores.get(rule.category) ?? 0) + 2 + rule.hits * 0.2)
+      matches.add(rule.keyword)
     }
   })
 
@@ -310,16 +241,18 @@ function predictCategory(description: string, rules: LearningRule[]) {
     keywords.forEach((keyword) => {
       if (text.includes(keyword)) {
         scores.set(category, (scores.get(category) ?? 0) + 1)
+        matches.add(keyword)
       }
     })
   })
 
   const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1])[0]
-  if (!ranked) return { category: 'Otros' as Category, confidence: 0.52 }
+  if (!ranked) return { category: 'Otros' as Category, confidence: 0.52, matches: [] as string[] }
 
   return {
     category: ranked[0],
     confidence: Math.min(0.98, 0.58 + ranked[1] * 0.08),
+    matches: [...matches].slice(0, 4),
   }
 }
 
@@ -328,9 +261,9 @@ function getPocketName(pockets: Pocket[], pocketId: string) {
 }
 
 function describePocketType(type: PocketType) {
-  if (type === 'daily') return 'Cuenta operativa'
-  if (type === 'savings') return 'Reserva y liquidez'
-  if (type === 'fixed') return 'Debitos y pagos'
+  if (type === 'daily') return 'Operacion'
+  if (type === 'savings') return 'Ahorro'
+  if (type === 'fixed') return 'Pagos fijos'
   return 'Meta o inversion'
 }
 
@@ -354,13 +287,18 @@ function hydrateState(raw: AppState) {
     ...raw,
     categories: raw.categories?.length ? raw.categories : [...defaultCategories],
     config: {
-      ...(raw.config ?? initialState.config),
       pocketTypeLabels: {
         ...initialState.config.pocketTypeLabels,
         ...(raw.config?.pocketTypeLabels ?? {}),
       },
     },
     debts: raw.debts ?? initialState.debts,
+    debtPayments: raw.debtPayments ?? initialState.debtPayments,
+    monthClosures: raw.monthClosures ?? initialState.monthClosures,
+    fixedExpenses: (raw.fixedExpenses ?? initialState.fixedExpenses).map((item) => ({
+      ...item,
+      active: item.active ?? true,
+    })),
     pockets: raw.pockets.map((pocket) => ({
       ...pocket,
       balance: 0,
@@ -374,20 +312,49 @@ function App() {
   const today = formatDateISO(now)
   const currentMonthKey = today.slice(0, 7)
   const currentDay = now.getDate()
-
-  const [state, setState] = useState<AppState>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? hydrateState(JSON.parse(stored) as AppState) : initialState
+  const auth = useSimpleUsersAuth()
+  const remoteDriver = createSupabaseFinanceDriver<AppState>(auth.user?.cedula)
+  const {
+    state,
+    setState,
+    isReady,
+    syncSource,
+    syncError,
+    lastSyncedAt,
+    supabaseConfigured,
+    profileId,
+  } = usePersistentSnapshot<AppState>({
+    storageKey: STORAGE_KEY,
+    initialState,
+    hydrate: hydrateState,
+    remote: remoteDriver,
   })
   const [activeView, setActiveView] = useState<ViewKey>('resumen')
   const [activeModule, setActiveModule] = useState<ModuleKey>('gasto')
+  const [openComposer, setOpenComposer] = useState<ComposerView | null>(null)
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [authForm, setAuthForm] = useState({ username: '', cedula: '', password: '' })
+  const [authFeedback, setAuthFeedback] = useState<string | null>(null)
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const isAdminUser = auth.user?.typeuser === 'admin'
+
+  useEffect(() => {
+    if (isAdminUser) {
+      void loadManagedUsers()
+    } else {
+      setManagedUsers([])
+      setShowUserAdminForm(false)
+      resetUserAdminForm()
+    }
+  }, [isAdminUser])
 
   const [expenseForm, setExpenseForm] = useState({
     id: '',
     description: '',
     amount: '',
     pocketId: initialState.pockets[0].id,
+    date: today,
   })
   const [incomeForm, setIncomeForm] = useState({
     id: '',
@@ -395,6 +362,7 @@ function App() {
     amount: '',
     pocketId: initialState.pockets[0].id,
     recurring: true,
+    date: today,
   })
   const [transferForm, setTransferForm] = useState({
     id: '',
@@ -402,6 +370,7 @@ function App() {
     toPocketId: initialState.pockets[1].id,
     amount: '',
     note: '',
+    date: today,
   })
   const [fixedForm, setFixedForm] = useState({
     id: '',
@@ -423,11 +392,21 @@ function App() {
   const [movementFilters, setMovementFilters] = useState<{
     pocketId: string
     kind: 'todos' | MovementKind
+    query: string
+    dateFrom: string
+    dateTo: string
+    groupBy: 'dia' | 'mes'
   }>({
     pocketId: 'todos',
     kind: 'todos',
+    query: '',
+    dateFrom: '',
+    dateTo: '',
+    groupBy: 'dia',
   })
+  const [movementMonthKey, setMovementMonthKey] = useState(currentMonthKey)
   const [debtForm, setDebtForm] = useState({
+    id: '',
     title: '',
     totalAmount: '',
     installmentAmount: '',
@@ -435,15 +414,28 @@ function App() {
     pocketId: initialState.pockets[0].id,
     category: 'Otros' as Category,
   })
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [state])
+  const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
+  const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
+  const [managedUsers, setManagedUsers] = useState<
+    Array<{ username: string; cedula: string; nombre: string | null; password: string; typeuser: 'admin' | 'user' }>
+  >([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [usersFeedback, setUsersFeedback] = useState<string | null>(null)
+  const [showUserAdminForm, setShowUserAdminForm] = useState(false)
+  const [userAdminForm, setUserAdminForm] = useState({
+    username: '',
+    cedula: '',
+    nombre: '',
+    password: '',
+    typeuser: 'user' as 'admin' | 'user',
+    editingUsername: '',
+  })
 
   const suggestion = useMemo(
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
     [expenseForm.description, state.learningRules],
   )
+  const previousMonthKey = getMonthKeyFromOffset(currentMonthKey, -1)
 
   const monthExpenses = useMemo(
     () => state.expenses.filter((expense) => expense.date.startsWith(currentMonthKey)),
@@ -457,8 +449,32 @@ function App() {
     () => state.transfers.filter((transfer) => transfer.date.startsWith(currentMonthKey)),
     [currentMonthKey, state.transfers],
   )
+  const movementMonthExpenses = useMemo(
+    () => state.expenses.filter((expense) => expense.date.startsWith(movementMonthKey)),
+    [movementMonthKey, state.expenses],
+  )
+  const movementMonthIncomes = useMemo(
+    () => state.incomes.filter((income) => income.date.startsWith(movementMonthKey)),
+    [movementMonthKey, state.incomes],
+  )
+  const movementMonthTransfers = useMemo(
+    () => state.transfers.filter((transfer) => transfer.date.startsWith(movementMonthKey)),
+    [movementMonthKey, state.transfers],
+  )
+  const previousMonthExpenses = useMemo(
+    () => state.expenses.filter((expense) => expense.date.startsWith(previousMonthKey)),
+    [previousMonthKey, state.expenses],
+  )
+  const previousMonthIncomes = useMemo(
+    () => state.incomes.filter((income) => income.date.startsWith(previousMonthKey)),
+    [previousMonthKey, state.incomes],
+  )
   const activeDebts = useMemo(
     () => state.debts.filter((debt) => debt.active && debt.remainingAmount > 0),
+    [state.debts],
+  )
+  const completedDebts = useMemo(
+    () => state.debts.filter((debt) => debt.remainingAmount <= 0),
     [state.debts],
   )
 
@@ -483,16 +499,20 @@ function App() {
 
   const fixedStatus = useMemo(() => {
     const activeItems = state.fixedExpenses.filter((item) => item.active)
+    const paused = state.fixedExpenses.filter((item) => !item.active)
     const paid = activeItems.filter((item) => item.lastPaidMonth === currentMonthKey)
     const pending = activeItems.filter((item) => item.lastPaidMonth !== currentMonthKey)
     const overdue = pending.filter((item) => item.confirmationDay < currentDay)
-    return { activeItems, paid, pending, overdue }
+    const review = pending.filter((item) => item.confirmationDay <= currentDay)
+    return { activeItems, paid, pending, overdue, paused, review }
   }, [currentDay, currentMonthKey, state.fixedExpenses])
 
   const totals = useMemo(() => {
     const pocketBalance = Object.values(pocketBalances).reduce((sum, balance) => sum + balance, 0)
     const totalExpenses = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
     const totalIncomes = monthIncomes.reduce((sum, income) => sum + income.amount, 0)
+    const previousExpenses = previousMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+    const previousIncomes = previousMonthIncomes.reduce((sum, income) => sum + income.amount, 0)
     const pendingFixed = fixedStatus.pending.reduce((sum, item) => sum + item.amount, 0)
     const pendingDebt = activeDebts.reduce((sum, debt) => sum + debt.remainingAmount, 0)
 
@@ -500,11 +520,14 @@ function App() {
       pocketBalance,
       totalExpenses,
       totalIncomes,
+      previousExpenses,
+      previousIncomes,
       pendingFixed,
       pendingDebt,
       netFlow: totalIncomes - totalExpenses,
+      debtToIncomeRatio: totalIncomes > 0 ? pendingDebt / totalIncomes : 0,
     }
-  }, [activeDebts, fixedStatus.pending, monthExpenses, monthIncomes, pocketBalances])
+  }, [activeDebts, fixedStatus.pending, monthExpenses, monthIncomes, pocketBalances, previousMonthExpenses, previousMonthIncomes])
 
   const topCategories = useMemo(() => {
     const grouped = monthExpenses.reduce<Record<string, number>>((acc, expense) => {
@@ -561,6 +584,53 @@ function App() {
     return items.sort((a, b) => (a.date < b.date ? 1 : -1))
   }, [monthExpenses, monthIncomes, monthTransfers, state.pockets])
 
+  const movementActivity = useMemo(() => {
+    const items = [
+      ...movementMonthExpenses.map((expense) => ({
+        id: expense.id,
+        date: expense.date,
+        kind: 'gasto' as const,
+        source: expense.source,
+        editable: expense.source === 'manual' || expense.source === 'wallet',
+        deletable: expense.source === 'manual' || expense.source === 'wallet',
+        title: expense.description,
+        amount: -expense.amount,
+        pocketIds: [expense.pocketId],
+        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
+        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
+      })),
+      ...movementMonthIncomes.map((income) => ({
+        id: income.id,
+        date: income.date,
+        kind: 'ingreso' as const,
+        editable: true,
+        deletable: true,
+        title: income.title,
+        amount: income.amount,
+        pocketIds: [income.pocketId],
+        meta: getPocketName(state.pockets, income.pocketId),
+        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
+      })),
+      ...movementMonthTransfers.map((transfer) => ({
+        id: transfer.id,
+        date: transfer.date,
+        kind: 'transferencia' as const,
+        editable: true,
+        deletable: true,
+        title: transfer.note || 'Transferencia interna',
+        amount: transfer.amount,
+        pocketIds: [transfer.fromPocketId, transfer.toPocketId],
+        meta: `${getPocketName(state.pockets, transfer.fromPocketId)} -> ${getPocketName(
+          state.pockets,
+          transfer.toPocketId,
+        )}`,
+        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
+      })),
+    ]
+
+    return items.sort((a, b) => (a.date < b.date ? 1 : -1))
+  }, [movementMonthExpenses, movementMonthIncomes, movementMonthTransfers, state.pockets])
+
   const selectedPocket = state.pockets.find((pocket) => pocket.id === selectedPocketId) ?? state.pockets[0]
 
   const selectedPocketActivity = useMemo(
@@ -569,12 +639,17 @@ function App() {
   )
 
   const filteredActivity = useMemo(() => {
-    return activity
+    return movementActivity
       .filter((item) => {
         const matchesPocket =
           movementFilters.pocketId === 'todos' || item.pocketIds.includes(movementFilters.pocketId)
         const matchesKind = movementFilters.kind === 'todos' || item.kind === movementFilters.kind
-        return matchesPocket && matchesKind
+        const matchesQuery =
+          !movementFilters.query ||
+          normalize(`${item.title} ${item.meta} ${item.detail}`).includes(normalize(movementFilters.query))
+        const matchesDateFrom = !movementFilters.dateFrom || item.date >= movementFilters.dateFrom
+        const matchesDateTo = !movementFilters.dateTo || item.date <= movementFilters.dateTo
+        return matchesPocket && matchesKind && matchesQuery && matchesDateFrom && matchesDateTo
       })
       .map((item) => {
         if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
@@ -598,7 +673,16 @@ function App() {
             : `Entrada por transferencia desde ${transferPocketName}`,
         }
       })
-  }, [activity, movementFilters, state.pockets, state.transfers])
+  }, [movementActivity, movementFilters, state.pockets, state.transfers])
+
+  const groupedFilteredActivity = useMemo(() => {
+    return filteredActivity.reduce<Record<string, typeof filteredActivity>>((acc, item) => {
+      const groupKey = movementFilters.groupBy === 'mes' ? item.date.slice(0, 7) : item.date
+      if (!acc[groupKey]) acc[groupKey] = []
+      acc[groupKey].push(item)
+      return acc
+    }, {})
+  }, [filteredActivity, movementFilters.groupBy])
 
   const movementSummary = useMemo(() => {
     const inflow = filteredActivity
@@ -653,20 +737,74 @@ function App() {
 
     const debtBreakdown = activeDebts.map((debt) => {
       const paidAmount = debt.totalAmount - debt.remainingAmount
+      const estimatedMonthsLeft = Math.max(1, Math.ceil(debt.remainingAmount / Math.max(1, debt.installmentAmount)))
       return {
         ...debt,
         paidAmount,
         ratio: debt.totalAmount > 0 ? paidAmount / debt.totalAmount : 0,
+        estimatedPayoffMonth: getMonthKeyFromOffset(currentMonthKey, estimatedMonthsLeft - 1),
       }
     })
+
+    const monthTrend = Array.from({ length: 6 }, (_, index) => {
+      const monthKey = getMonthKeyFromOffset(currentMonthKey, index - 5)
+      const income = state.incomes
+        .filter((item) => item.date.startsWith(monthKey))
+        .reduce((sum, item) => sum + item.amount, 0)
+      const expense = state.expenses
+        .filter((item) => item.date.startsWith(monthKey))
+        .reduce((sum, item) => sum + item.amount, 0)
+      return {
+        monthKey,
+        income,
+        expense,
+        net: income - expense,
+      }
+    })
+
+    const maxTrendBase = Math.max(
+      ...monthTrend.flatMap((item) => [item.income, item.expense, Math.abs(item.net)]),
+      1,
+    )
+
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const dailyTrend = Array.from({ length: daysInMonth }, (_, index) => {
+      const day = String(index + 1).padStart(2, '0')
+      const date = `${currentMonthKey}-${day}`
+      const income = monthIncomes.filter((item) => item.date === date).reduce((sum, item) => sum + item.amount, 0)
+      const expense = monthExpenses.filter((item) => item.date === date).reduce((sum, item) => sum + item.amount, 0)
+      return {
+        date,
+        label: day,
+        net: income - expense,
+      }
+    })
+
+    const maxDailyNet = Math.max(...dailyTrend.map((item) => Math.abs(item.net)), 1)
 
     return {
       maxFlowBase,
       categoryBreakdown,
       pocketBreakdown,
       debtBreakdown,
+      monthTrend,
+      maxTrendBase,
+      dailyTrend,
+      maxDailyNet,
     }
-  }, [activeDebts, monthExpenses, pocketBalances, state.categories, state.pockets, totals])
+  }, [activeDebts, currentMonthKey, monthExpenses, monthIncomes, now, pocketBalances, state.categories, state.expenses, state.incomes, state.pockets, totals])
+
+  const debtPaymentHistory = useMemo(() => {
+    return state.debtPayments.reduce<Record<string, DebtPayment[]>>((acc, payment) => {
+      if (!acc[payment.debtId]) acc[payment.debtId] = []
+      acc[payment.debtId].push(payment)
+      acc[payment.debtId].sort((a, b) => (a.date < b.date ? 1 : -1))
+      return acc
+    }, {})
+  }, [state.debtPayments])
+
+  const currentMonthClosed = state.monthClosures.some((item) => item.monthKey === currentMonthKey)
+  const previousClosure = state.monthClosures.find((item) => item.monthKey === previousMonthKey)
 
   const coachingMessage = useMemo(() => {
     if (fixedStatus.overdue.length > 0) {
@@ -690,6 +828,11 @@ function App() {
     if (module) setActiveModule(module)
   }
 
+  function openComposerForView(view: ComposerView, module?: ModuleKey) {
+    setOpenComposer(view)
+    if (module) setActiveModule(module)
+  }
+
   function resetPocketForm() {
     setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: '💼' })
   }
@@ -700,6 +843,7 @@ function App() {
       description: '',
       amount: '',
       pocketId: initialState.pockets[0].id,
+      date: today,
     })
   }
 
@@ -710,6 +854,7 @@ function App() {
       amount: '',
       pocketId: initialState.pockets[0].id,
       recurring: true,
+      date: today,
     })
   }
 
@@ -720,6 +865,7 @@ function App() {
       toPocketId: initialState.pockets[1].id,
       amount: '',
       note: '',
+      date: today,
     })
   }
 
@@ -735,11 +881,24 @@ function App() {
     })
   }
 
+  function resetDebtForm() {
+    setDebtForm({
+      id: '',
+      title: '',
+      totalAmount: '',
+      installmentAmount: '',
+      dueDay: String(Math.min(currentDay + 7, 28)),
+      pocketId: initialState.pockets[0].id,
+      category: 'Otros',
+    })
+  }
+
   function startEditPocket(pocketId: string) {
     const pocket = state.pockets.find((item) => item.id === pocketId)
     if (!pocket) return
     setSelectedPocketId(pocketId)
     setActiveModule('bolsillos')
+    setOpenComposer('bolsillos')
     setPocketForm({
       id: pocket.id,
       name: pocket.name,
@@ -753,6 +912,7 @@ function App() {
     const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
     if (!fixed) return
     setActiveModule('fijos')
+    setOpenComposer('programacion')
     setFixedForm({
       id: fixed.id,
       title: fixed.title,
@@ -764,9 +924,25 @@ function App() {
     })
   }
 
+  function startEditDebt(debtId: string) {
+    const debt = state.debts.find((item) => item.id === debtId)
+    if (!debt) return
+    setOpenComposer('deudas')
+    setDebtForm({
+      id: debt.id,
+      title: debt.title,
+      totalAmount: String(debt.totalAmount),
+      installmentAmount: String(debt.installmentAmount),
+      dueDay: String(debt.dueDay),
+      pocketId: debt.pocketId,
+      category: debt.category,
+    })
+  }
+
   function startEditMovement(kind: MovementKind, movementId: string) {
     setActiveView('movimientos')
     setActiveModule(kind)
+    setOpenComposer('movimientos')
 
     if (kind === 'gasto') {
       const expense = state.expenses.find((item) => item.id === movementId)
@@ -777,6 +953,7 @@ function App() {
         description: expense.description,
         amount: String(expense.amount),
         pocketId: expense.pocketId,
+        date: expense.date,
       })
       return
     }
@@ -791,6 +968,7 @@ function App() {
         amount: String(income.amount),
         pocketId: income.pocketId,
         recurring: income.recurring,
+        date: income.date,
       })
       return
     }
@@ -804,10 +982,13 @@ function App() {
       toPocketId: transfer.toPocketId,
       amount: String(transfer.amount),
       note: transfer.note,
+      date: transfer.date,
     })
   }
 
   function handleDeleteMovement(kind: MovementKind, movementId: string) {
+    if (!window.confirm('Este movimiento se eliminara de forma permanente.')) return
+
     setState((current) => {
       if (kind === 'gasto') {
         const expense = current.expenses.find((item) => item.id === movementId)
@@ -837,6 +1018,29 @@ function App() {
     if (transferForm.id === movementId) resetTransferForm()
   }
 
+  function handleExportMovements() {
+    const header = ['fecha', 'tipo', 'titulo', 'meta', 'detalle', 'valor']
+    const rows = filteredActivity.map((item) => [
+      item.date,
+      item.kind,
+      item.title,
+      item.meta,
+      item.detail,
+      String(item.amount),
+    ])
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
+      .join('\n')
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `movimientos-${movementMonthKey}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   function handleAddExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const numericAmount = Number(expenseForm.amount)
@@ -849,7 +1053,7 @@ function App() {
         description: expenseForm.description.trim(),
         amount: numericAmount,
         pocketId: expenseForm.pocketId,
-        date: currentExpense?.date ?? today,
+        date: expenseForm.date || currentExpense?.date || today,
         source: currentExpense?.source ?? 'manual',
         category: suggestion.category,
         confidence: suggestion.confidence,
@@ -864,6 +1068,7 @@ function App() {
     })
 
     resetExpenseForm()
+    setOpenComposer(null)
   }
 
   function handleAddIncome(event: React.FormEvent<HTMLFormElement>) {
@@ -878,7 +1083,7 @@ function App() {
         title: incomeForm.title.trim(),
         amount: numericAmount,
         pocketId: incomeForm.pocketId,
-        date: currentIncome?.date ?? today,
+        date: incomeForm.date || currentIncome?.date || today,
         recurring: incomeForm.recurring,
       }
 
@@ -891,6 +1096,7 @@ function App() {
     })
 
     resetIncomeForm()
+    setOpenComposer(null)
   }
 
   function handleAddTransfer(event: React.FormEvent<HTMLFormElement>) {
@@ -912,7 +1118,7 @@ function App() {
         fromPocketId: transferForm.fromPocketId,
         toPocketId: transferForm.toPocketId,
         amount: numericAmount,
-        date: currentTransfer?.date ?? today,
+        date: transferForm.date || currentTransfer?.date || today,
         note: transferForm.note.trim(),
       }
 
@@ -925,6 +1131,7 @@ function App() {
     })
 
     resetTransferForm()
+    setOpenComposer(null)
   }
 
   function handleAddFixedExpense(event: React.FormEvent<HTMLFormElement>) {
@@ -965,6 +1172,7 @@ function App() {
     })
 
     resetFixedForm()
+    setOpenComposer(null)
   }
 
   function handleAddPocket(event: React.FormEvent<HTMLFormElement>) {
@@ -987,6 +1195,7 @@ function App() {
         : [...current.pockets, newPocket],
     }))
     resetPocketForm()
+    setOpenComposer(null)
   }
 
   function handleCategoryCorrection(expenseId: string, category: Category) {
@@ -1039,6 +1248,38 @@ function App() {
     })
   }
 
+  function handleToggleFixedExpense(fixedId: string) {
+    setState((current) => ({
+      ...current,
+      fixedExpenses: current.fixedExpenses.map((item) =>
+        item.id === fixedId ? { ...item, active: !item.active } : item,
+      ),
+    }))
+  }
+
+  function handleCloseMonth() {
+    setState((current) => {
+      if (current.monthClosures.some((item) => item.monthKey === currentMonthKey)) return current
+
+      return {
+        ...current,
+        monthClosures: [
+          {
+            monthKey: currentMonthKey,
+            closedAt: today,
+            income: totals.totalIncomes,
+            expense: totals.totalExpenses,
+            netFlow: totals.netFlow,
+            pocketBalance: totals.pocketBalance,
+            pendingDebt: totals.pendingDebt,
+            pendingFixed: totals.pendingFixed,
+          },
+          ...current.monthClosures,
+        ],
+      }
+    })
+  }
+
   function handleAddDebt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const totalAmount = Number(debtForm.totalAmount)
@@ -1055,40 +1296,43 @@ function App() {
       return
     }
 
-    setState((current) => ({
-      ...current,
-      debts: [
-        {
-          id: crypto.randomUUID(),
-          title: debtForm.title.trim(),
-          totalAmount,
-          remainingAmount: totalAmount,
-          installmentAmount,
-          dueDay,
-          pocketId: debtForm.pocketId,
-          category: debtForm.category,
-          active: true,
-        },
-        ...current.debts,
-      ],
-    }))
+    setState((current) => {
+      const existing = current.debts.find((item) => item.id === debtForm.id)
+      const paidAmount = existing ? existing.totalAmount - existing.remainingAmount : 0
+      const remainingAmount = Math.max(0, totalAmount - paidAmount)
+      const nextDebt: Debt = {
+        id: debtForm.id || crypto.randomUUID(),
+        title: debtForm.title.trim(),
+        totalAmount,
+        remainingAmount,
+        installmentAmount,
+        dueDay,
+        pocketId: debtForm.pocketId,
+        category: debtForm.category,
+        active: remainingAmount > 0,
+      }
 
-    setDebtForm({
-      title: '',
-      totalAmount: '',
-      installmentAmount: '',
-      dueDay: String(Math.min(currentDay + 7, 28)),
-      pocketId: initialState.pockets[0].id,
-      category: 'Otros',
+      return {
+        ...current,
+        debts: debtForm.id
+          ? current.debts.map((item) => (item.id === debtForm.id ? nextDebt : item))
+          : [nextDebt, ...current.debts],
+      }
     })
+
+    resetDebtForm()
+    setOpenComposer(null)
   }
 
-  function handlePayDebt(debtId: string) {
+  function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
     setState((current) => {
       const debt = current.debts.find((item) => item.id === debtId)
       if (!debt || !debt.active || debt.remainingAmount <= 0) return current
 
-      const paymentAmount = Math.min(debt.installmentAmount, debt.remainingAmount)
+      const draftAmount = Number(debtPaymentDrafts[debtId] || debt.installmentAmount)
+      const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
+      if (paymentAmount <= 0) return current
+
       const expense: Expense = {
         id: crypto.randomUUID(),
         description: `Abono deuda: ${debt.title}`,
@@ -1103,6 +1347,16 @@ function App() {
       return {
         ...current,
         expenses: [expense, ...current.expenses],
+        debtPayments: [
+          {
+            id: crypto.randomUUID(),
+            debtId,
+            amount: paymentAmount,
+            date: today,
+            kind,
+          },
+          ...current.debtPayments,
+        ],
         debts: current.debts
           .map((item) => {
             if (item.id !== debtId) return item
@@ -1112,10 +1366,12 @@ function App() {
               remainingAmount: remaining,
               active: remaining > 0,
             }
-          })
-          .filter((item) => item.active || item.remainingAmount > 0),
+          }),
       }
     })
+
+    setDebtPaymentDrafts((current) => ({ ...current, [debtId]: '' }))
+    setOpenDebtPaymentId(null)
   }
 
   function handleAddCategory(event: React.FormEvent<HTMLFormElement>) {
@@ -1132,6 +1388,7 @@ function App() {
 
   function handleRemoveCategory(category: Category) {
     if (state.categories.length <= 1) return
+    if (!window.confirm(`La categoria ${category} se reemplazara por Otros en los registros actuales.`)) return
 
     setState((current) => ({
       ...current,
@@ -1146,14 +1403,150 @@ function App() {
     }))
   }
 
-  function updateConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
+  function handleRemoveLearningRule(keyword: string) {
+    setState((current) => ({
+      ...current,
+      learningRules: current.learningRules.filter((rule) => rule.keyword !== keyword),
+    }))
+  }
+
+  function updatePocketTypeLabels(value: AppConfig['pocketTypeLabels']) {
     setState((current) => ({
       ...current,
       config: {
         ...current.config,
-        [key]: value,
+        pocketTypeLabels: value,
       },
     }))
+  }
+
+  async function loadManagedUsers() {
+    if (!supabase || !isAdminUser) return
+    setUsersLoading(true)
+    setUsersFeedback(null)
+
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('username, cedula, nombre, password, typeuser')
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      setUsersFeedback(error.message)
+      setUsersLoading(false)
+      return
+    }
+
+    setManagedUsers(data ?? [])
+    setUsersLoading(false)
+  }
+
+  function resetUserAdminForm() {
+    setShowUserAdminForm(false)
+    setUserAdminForm({
+      username: '',
+      cedula: '',
+      nombre: '',
+      password: '',
+      typeuser: 'user',
+      editingUsername: '',
+    })
+  }
+
+  function startEditManagedUser(username: string) {
+    const target = managedUsers.find((item) => item.username === username)
+    if (!target) return
+    setShowUserAdminForm(true)
+    setUserAdminForm({
+      username: target.username,
+      cedula: target.cedula,
+      nombre: target.nombre ?? '',
+      password: target.password,
+      typeuser: target.typeuser,
+      editingUsername: target.username,
+    })
+  }
+
+  async function handleSubmitManagedUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (
+      !supabase ||
+      !isAdminUser ||
+      !userAdminForm.username.trim() ||
+      !userAdminForm.cedula.trim() ||
+      !userAdminForm.password.trim()
+    ) {
+      return
+    }
+
+    setUsersLoading(true)
+    setUsersFeedback(null)
+
+    if (userAdminForm.editingUsername) {
+      const { error } = await supabase
+        .from('usuarios')
+        .update({
+          username: userAdminForm.username.trim(),
+          cedula: userAdminForm.cedula.trim(),
+          nombre: userAdminForm.nombre.trim() || null,
+          password: userAdminForm.password.trim(),
+          typeuser: userAdminForm.typeuser,
+        })
+        .eq('username', userAdminForm.editingUsername)
+
+      if (error) {
+        setUsersFeedback(error.message)
+        setUsersLoading(false)
+        return
+      }
+
+      setUsersFeedback('Usuario actualizado correctamente.')
+    } else {
+      const { error } = await supabase.from('usuarios').insert({
+        username: userAdminForm.username.trim(),
+        cedula: userAdminForm.cedula.trim(),
+        nombre: userAdminForm.nombre.trim() || `Usuario ${userAdminForm.cedula.trim()}`,
+        password: userAdminForm.password.trim(),
+        typeuser: userAdminForm.typeuser,
+      })
+
+      if (error) {
+        setUsersFeedback(error.message)
+        setUsersLoading(false)
+        return
+      }
+
+      setUsersFeedback('Usuario creado correctamente.')
+    }
+
+    resetUserAdminForm()
+    await loadManagedUsers()
+  }
+
+  async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!authForm.username.trim() || !authForm.password.trim()) return
+    if (authMode === 'register' && !authForm.cedula.trim()) return
+
+    setIsSubmittingAuth(true)
+    setAuthFeedback(null)
+
+    const result =
+      authMode === 'login'
+        ? await auth.signIn(authForm.username.trim(), authForm.password)
+        : await auth.signUp(authForm.username.trim(), authForm.cedula.trim(), authForm.password)
+
+    setIsSubmittingAuth(false)
+
+    if (result.error) {
+      setAuthFeedback(result.error)
+      return
+    }
+
+    setAuthFeedback(
+      authMode === 'login'
+        ? 'Sesion iniciada correctamente.'
+        : 'Usuario creado correctamente.',
+    )
   }
 
   function renderActiveForm() {
@@ -1192,14 +1585,34 @@ function App() {
               </select>
             </label>
           </div>
+          <label>
+            Fecha del movimiento
+            <input
+              type="date"
+              value={expenseForm.date}
+              onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
+            />
+          </label>
           <div className="smart-box">
             <span>Categoria sugerida</span>
             <strong>{suggestion.category}</strong>
             <p>Confianza estimada: {Math.round(suggestion.confidence * 100)}%</p>
+            <p>
+              {suggestion.matches.length > 0
+                ? `Pistas detectadas: ${suggestion.matches.join(', ')}`
+                : 'Sin reglas previas suficientes. Esta sugerencia usa coincidencias generales.'}
+            </p>
           </div>
           <button type="submit">{expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}</button>
           {expenseForm.id && (
-            <button type="button" className="secondary-button" onClick={resetExpenseForm}>
+            <button
+              type="button"
+              className="secondary-button cancel-action"
+              onClick={() => {
+                resetExpenseForm()
+                setOpenComposer(null)
+              }}
+            >
               Cancelar edicion
             </button>
           )}
@@ -1242,6 +1655,14 @@ function App() {
               </select>
             </label>
           </div>
+          <label>
+            Fecha del movimiento
+            <input
+              type="date"
+              value={incomeForm.date}
+              onChange={(event) => setIncomeForm((current) => ({ ...current, date: event.target.value }))}
+            />
+          </label>
           <label className="toggle-row">
             <input
               type="checkbox"
@@ -1252,7 +1673,14 @@ function App() {
           </label>
           <button type="submit">{incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}</button>
           {incomeForm.id && (
-            <button type="button" className="secondary-button" onClick={resetIncomeForm}>
+            <button
+              type="button"
+              className="secondary-button cancel-action"
+              onClick={() => {
+                resetIncomeForm()
+                setOpenComposer(null)
+              }}
+            >
               Cancelar edicion
             </button>
           )}
@@ -1310,11 +1738,26 @@ function App() {
               />
             </label>
           </div>
+          <label>
+            Fecha del movimiento
+            <input
+              type="date"
+              value={transferForm.date}
+              onChange={(event) => setTransferForm((current) => ({ ...current, date: event.target.value }))}
+            />
+          </label>
           <button type="submit">
             {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
           </button>
           {transferForm.id && (
-            <button type="button" className="secondary-button" onClick={resetTransferForm}>
+            <button
+              type="button"
+              className="secondary-button cancel-action"
+              onClick={() => {
+                resetTransferForm()
+                setOpenComposer(null)
+              }}
+            >
               Cancelar edicion
             </button>
           )}
@@ -1394,9 +1837,16 @@ function App() {
               ))}
             </select>
           </label>
-          <button type="submit">{fixedForm.id ? 'Guardar obligacion' : 'Agregar gasto fijo'}</button>
+          <button type="submit">{fixedForm.id ? 'Guardar obligacion' : 'Registrar obligacion'}</button>
           {fixedForm.id && (
-            <button type="button" className="secondary-button" onClick={resetFixedForm}>
+            <button
+              type="button"
+              className="secondary-button cancel-action"
+              onClick={() => {
+                resetFixedForm()
+                setOpenComposer(null)
+              }}
+            >
               Cancelar edicion
             </button>
           )}
@@ -1466,7 +1916,14 @@ function App() {
         </div>
         <button type="submit">{pocketForm.id ? 'Guardar bolsillo' : 'Crear bolsillo'}</button>
         {pocketForm.id && (
-          <button type="button" className="secondary-button" onClick={resetPocketForm}>
+          <button
+            type="button"
+            className="secondary-button cancel-action"
+            onClick={() => {
+              resetPocketForm()
+              setOpenComposer(null)
+            }}
+          >
             Cancelar edicion
           </button>
         )}
@@ -1514,6 +1971,10 @@ function App() {
             <div className="quick-stat">
               <span>Vencidos</span>
               <strong>{fixedStatus.overdue.length}</strong>
+            </div>
+            <div className="quick-stat">
+              <span>Cierre mensual</span>
+              <strong>{currentMonthClosed ? 'Cerrado' : 'Abierto'}</strong>
             </div>
           </article>
         </section>
@@ -1600,6 +2061,52 @@ function App() {
           <article className="panel banking-panel analytics-panel">
             <div className="panel-header">
               <div>
+                <span className="micro-label">Comparativo</span>
+                <h2>Mes contra mes</h2>
+              </div>
+            </div>
+            <div className="flow-metric-list">
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Ingresos {previousMonthKey}</span>
+                  <strong>{money.format(previousClosure?.income ?? totals.previousIncomes)}</strong>
+                </div>
+                <div className="flow-bar income">
+                  <div
+                    style={{
+                      width: `${((previousClosure?.income ?? totals.previousIncomes) / summaryAnalytics.maxFlowBase) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Gastos {previousMonthKey}</span>
+                  <strong>{money.format(previousClosure?.expense ?? totals.previousExpenses)}</strong>
+                </div>
+                <div className="flow-bar expense">
+                  <div
+                    style={{
+                      width: `${((previousClosure?.expense ?? totals.previousExpenses) / summaryAnalytics.maxFlowBase) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flow-metric">
+                <div className="flow-metric-head">
+                  <span>Ratio deuda / ingreso</span>
+                  <strong>{Math.round(totals.debtToIncomeRatio * 100)}%</strong>
+                </div>
+                <div className="flow-bar debt">
+                  <div style={{ width: `${Math.min(totals.debtToIncomeRatio * 100, 100)}%` }} />
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel">
+            <div className="panel-header">
+              <div>
                 <span className="micro-label">Bolsillos</span>
                 <h2>Distribucion del saldo</h2>
               </div>
@@ -1651,11 +2158,64 @@ function App() {
                   <p className="movement-detail">
                     Pagado {money.format(debt.paidAmount)} de {money.format(debt.totalAmount)}
                   </p>
+                  <p className="movement-detail">Cierre estimado: {debt.estimatedPayoffMonth}</p>
                 </div>
               ))}
               {summaryAnalytics.debtBreakdown.length === 0 && (
                 <p className="empty-copy">No hay deudas activas para analizar.</p>
               )}
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel wide-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Tendencia</span>
+                <h2>Flujo diario del mes</h2>
+              </div>
+              <button type="button" className="action-trigger ghost" onClick={handleCloseMonth}>
+                {currentMonthClosed ? 'Mes cerrado' : 'Cerrar mes'}
+              </button>
+            </div>
+            <div className="daily-trend-board">
+              {summaryAnalytics.dailyTrend.map((item) => (
+                <div key={item.date} className="daily-trend-bar">
+                  <div
+                    className={item.net >= 0 ? 'trend-fill positive' : 'trend-fill negative'}
+                    style={{
+                      height: `${Math.max((Math.abs(item.net) / summaryAnalytics.maxDailyNet) * 100, 6)}%`,
+                    }}
+                  />
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="panel banking-panel analytics-panel wide-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Tendencia</span>
+                <h2>Ultimos seis meses</h2>
+              </div>
+            </div>
+            <div className="monthly-trend-board">
+              {summaryAnalytics.monthTrend.map((item) => (
+                <div key={item.monthKey} className="monthly-trend-row">
+                  <div>
+                    <strong>{item.monthKey}</strong>
+                    <p className="movement-detail">Neto {money.format(item.net)}</p>
+                  </div>
+                  <div className="monthly-trend-bars">
+                    <div className="flow-bar income">
+                      <div style={{ width: `${(item.income / summaryAnalytics.maxTrendBase) * 100}%` }} />
+                    </div>
+                    <div className="flow-bar expense">
+                      <div style={{ width: `${(item.expense / summaryAnalytics.maxTrendBase) * 100}%` }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </article>
         </section>
@@ -1730,6 +2290,14 @@ function App() {
                   <strong>{fixedStatus.paid.length}</strong>
                 </div>
               </div>
+              <div className="review-list">
+                {fixedStatus.review.slice(0, 3).map((item) => (
+                  <div key={item.id} className="review-chip">
+                    <span>{item.title}</span>
+                    <strong>Confirmar dia {item.confirmationDay}</strong>
+                  </div>
+                ))}
+              </div>
             </section>
 
             <section className="panel banking-panel">
@@ -1758,14 +2326,125 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          {openComposer === 'bolsillos' && (
+            <section className="panel banking-panel action-panel">
+              <div className="composer-toolbar">
+                <div>
+                  <span className="micro-label">Accion</span>
+                  <h2>{pocketForm.id ? 'Editar bolsillo' : 'Registrar bolsillo'}</h2>
+                  <p>Configura nombre, tipo, color e icono para tu nuevo bolsillo.</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button cancel-action"
+                  onClick={() => {
+                    resetPocketForm()
+                    setOpenComposer(null)
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+              <form className="bank-form" onSubmit={handleAddPocket}>
+                <label>
+                  Nombre del bolsillo
+                  <input
+                    value={pocketForm.name}
+                    onChange={(event) =>
+                      setPocketForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                    placeholder="Ej. emergencia, viajes, impuestos"
+                  />
+                </label>
+                <div className="form-grid three">
+                  <label>
+                    Tipo
+                    <select
+                      value={pocketForm.type}
+                      onChange={(event) =>
+                        setPocketForm((current) => ({
+                          ...current,
+                          type: event.target.value as PocketType,
+                          icon:
+                            current.icon === getDefaultIcon(current.type)
+                              ? getDefaultIcon(event.target.value as PocketType)
+                              : current.icon,
+                        }))
+                      }
+                    >
+                      <option value="daily">Operacion</option>
+                      <option value="savings">Ahorro</option>
+                      <option value="fixed">Pagos fijos</option>
+                      <option value="invest">Meta o inversion</option>
+                    </select>
+                  </label>
+                  <label>
+                    Color
+                    <input
+                      type="color"
+                      value={pocketForm.color}
+                      onChange={(event) =>
+                        setPocketForm((current) => ({ ...current, color: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Icono
+                    <select
+                      value={pocketForm.icon}
+                      onChange={(event) =>
+                        setPocketForm((current) => ({ ...current, icon: event.target.value }))
+                      }
+                    >
+                      {pocketIcons.map((icon) => (
+                        <option key={icon} value={icon}>
+                          {icon}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="pocket-preview">
+                  <span className="icon-badge large" style={{ background: pocketForm.color }}>
+                    {pocketForm.icon}
+                  </span>
+                  <div>
+                    <strong>{pocketForm.name || 'Nuevo bolsillo'}</strong>
+                    <p>Saldo inicial {money.format(0)}</p>
+                  </div>
+                </div>
+                <button type="submit">{pocketForm.id ? 'Guardar cambios' : 'Crear bolsillo'}</button>
+                {pocketForm.id && (
+                  <button
+                    type="button"
+                    className="secondary-button cancel-action"
+                    onClick={() => {
+                      resetPocketForm()
+                      setOpenComposer(null)
+                    }}
+                  >
+                    Cancelar edicion
+                  </button>
+                )}
+              </form>
+            </section>
+          )}
+
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
                 <span className="micro-label">Mapa de bolsillos</span>
                 <h2>Tus cuentas internas</h2>
               </div>
-              <button className="text-link" type="button" onClick={() => setActiveModule('bolsillos')}>
-                Crear nuevo
+              <button
+                className="action-trigger"
+                type="button"
+                onClick={() => {
+                  resetPocketForm()
+                  openComposerForView('bolsillos', 'bolsillos')
+                }}
+              >
+                Registrar bolsillo
               </button>
             </div>
             <div className="account-strip two-cols">
@@ -1776,23 +2455,26 @@ function App() {
                   onClick={() => setSelectedPocketId(pocket.id)}
                 >
                   <div className="account-card-top">
-                    <span className="icon-badge" style={{ background: pocket.color }}>
-                      {pocket.icon}
-                    </span>
-                    <span>{getPocketTypeLabel(pocket.type)}</span>
+                    <div className="card-heading-inline">
+                      <span className="icon-badge" style={{ background: pocket.color }}>
+                        {pocket.icon}
+                      </span>
+                      <span>{getPocketTypeLabel(pocket.type)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="edit-icon-button"
+                      aria-label={`Editar bolsillo ${pocket.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        startEditPocket(pocket.id)
+                      }}
+                    >
+                      ✎
+                    </button>
                   </div>
                   <strong>{pocket.name}</strong>
                   <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
-                  <button
-                    type="button"
-                    className="text-link compact"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      startEditPocket(pocket.id)
-                    }}
-                  >
-                    Editar
-                  </button>
                 </article>
               ))}
             </div>
@@ -1846,109 +2528,99 @@ function App() {
             </div>
           </section>
         </div>
-
-        <aside className="secondary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Accion</span>
-                <h2>{pocketForm.id ? 'Editar bolsillo' : 'Nuevo bolsillo'}</h2>
-              </div>
-            </div>
-            <form className="bank-form" onSubmit={handleAddPocket}>
-              <label>
-                Nombre del bolsillo
-                <input
-                  value={pocketForm.name}
-                  onChange={(event) =>
-                    setPocketForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                  placeholder="Ej. emergencia, viajes, impuestos"
-                />
-              </label>
-              <div className="form-grid three">
-                <label>
-                  Tipo
-                  <select
-                    value={pocketForm.type}
-                    onChange={(event) =>
-                      setPocketForm((current) => ({
-                        ...current,
-                        type: event.target.value as PocketType,
-                        icon:
-                          current.icon === getDefaultIcon(current.type)
-                            ? getDefaultIcon(event.target.value as PocketType)
-                            : current.icon,
-                      }))
-                    }
-                  >
-                    <option value="daily">Operacion</option>
-                    <option value="savings">Ahorro</option>
-                    <option value="fixed">Pagos fijos</option>
-                    <option value="invest">Meta o inversion</option>
-                  </select>
-                </label>
-                <label>
-                  Color
-                  <input
-                    type="color"
-                    value={pocketForm.color}
-                    onChange={(event) =>
-                      setPocketForm((current) => ({ ...current, color: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Icono
-                  <select
-                    value={pocketForm.icon}
-                    onChange={(event) =>
-                      setPocketForm((current) => ({ ...current, icon: event.target.value }))
-                    }
-                  >
-                    {pocketIcons.map((icon) => (
-                      <option key={icon} value={icon}>
-                        {icon}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="pocket-preview">
-                <span className="icon-badge large" style={{ background: pocketForm.color }}>
-                  {pocketForm.icon}
-                </span>
-                <div>
-                  <strong>{pocketForm.name || 'Nuevo bolsillo'}</strong>
-                  <p>Saldo inicial {money.format(0)}</p>
-                </div>
-              </div>
-              <button type="submit">{pocketForm.id ? 'Guardar cambios' : 'Crear bolsillo'}</button>
-              {pocketForm.id && (
-                <button type="button" className="secondary-button" onClick={resetPocketForm}>
-                  Cancelar edicion
-                </button>
-              )}
-            </form>
-          </section>
-        </aside>
       </section>
     )
   }
 
   function renderMovementsView() {
     return (
-      <section className="dashboard-grid">
-        <div className="primary-column">
+      <>
+        {openComposer === 'movimientos' && (
+          <div className="fullscreen-composer-shell">
+            <div
+              className="fullscreen-composer-backdrop"
+              onClick={() => {
+                resetExpenseForm()
+                resetIncomeForm()
+                resetTransferForm()
+                setOpenComposer(null)
+              }}
+            />
+            <section className="fullscreen-composer-panel banking-panel action-panel">
+              <div className="composer-toolbar fullscreen">
+                <div>
+                  <span className="micro-label">Registrar</span>
+                  <h2>{moduleLabels[activeModule]}</h2>
+                  <p>{getModuleSummary(activeModule)}</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button cancel-action"
+                  onClick={() => {
+                    resetExpenseForm()
+                    resetIncomeForm()
+                    resetTransferForm()
+                    setOpenComposer(null)
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+              <div className="module-segmented">
+                {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
+                  <button
+                    key={module}
+                    type="button"
+                    className={module === activeModule ? 'segment active' : 'segment'}
+                    onClick={() => setActiveModule(module)}
+                  >
+                    {moduleLabels[module]}
+                  </button>
+                ))}
+              </div>
+              <div className="fullscreen-composer-body">{renderActiveForm()}</div>
+            </section>
+          </div>
+        )}
+
+        <section className="dashboard-grid">
+          <div className="primary-column">
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
                 <span className="micro-label">Filtro operativo</span>
                 <h2>Consulta por bolsillo y tipo</h2>
               </div>
-              <p>{movementSummary.count} resultado(s)</p>
+              <div className="panel-header-actions">
+                <p>
+                  {movementSummary.count} resultado(s) · {movementMonthKey}
+                </p>
+                <button
+                  className="action-trigger"
+                  type="button"
+                  onClick={() => {
+                    resetExpenseForm()
+                    resetIncomeForm()
+                    resetTransferForm()
+                    openComposerForView('movimientos', 'gasto')
+                  }}
+                >
+                  Registrar movimiento
+                </button>
+                <button className="secondary-button" type="button" onClick={handleExportMovements}>
+                  Exportar CSV
+                </button>
+              </div>
             </div>
             <div className="movement-filter-board">
+              <div className="filter-field">
+                <span className="filter-field-label">Mes</span>
+                <input
+                  type="month"
+                  value={movementMonthKey}
+                  onChange={(event) => setMovementMonthKey(event.target.value)}
+                />
+              </div>
               <div className="filter-field">
                 <span className="filter-field-label">Bolsillo</span>
                 <div className="filter-select-wrap">
@@ -1998,6 +2670,56 @@ function App() {
                     ? 'Todos los tipos'
                     : `Solo ${movementFilters.kind}`}
                 </p>
+                <p>Mes consultado: {movementMonthKey}</p>
+              </div>
+            </div>
+            <div className="movement-filter-board compact">
+              <div className="filter-field">
+                <span className="filter-field-label">Buscar</span>
+                <input
+                  value={movementFilters.query}
+                  onChange={(event) =>
+                    setMovementFilters((current) => ({ ...current, query: event.target.value }))
+                  }
+                  placeholder="Descripcion, bolsillo o categoria"
+                />
+              </div>
+              <div className="filter-field two-inline">
+                <label>
+                  Desde
+                  <input
+                    type="date"
+                    value={movementFilters.dateFrom}
+                    onChange={(event) =>
+                      setMovementFilters((current) => ({ ...current, dateFrom: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Hasta
+                  <input
+                    type="date"
+                    value={movementFilters.dateTo}
+                    onChange={(event) =>
+                      setMovementFilters((current) => ({ ...current, dateTo: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="filter-field">
+                <span className="filter-field-label">Agrupacion</span>
+                <div className="module-segmented compact">
+                  {(['dia', 'mes'] as const).map((groupBy) => (
+                    <button
+                      key={groupBy}
+                      type="button"
+                      className={movementFilters.groupBy === groupBy ? 'segment active' : 'segment'}
+                      onClick={() => setMovementFilters((current) => ({ ...current, groupBy }))}
+                    >
+                      {groupBy === 'dia' ? 'Por dia' : 'Por mes'}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="movement-summary-grid">
@@ -2024,77 +2746,64 @@ function App() {
               </div>
               <p>{filteredActivity.length} registros visibles</p>
             </div>
-            <div className="ledger">
-              {filteredActivity.map((item) => (
-                <article key={item.kind + item.id} className={`ledger-row movement-row ${item.kind}`}>
-                  <div className={`ledger-icon ${item.kind}`}></div>
-                  <div className="ledger-copy">
-                    <strong>{item.title}</strong>
-                    <p>
-                      {item.date} · {item.meta}
-                    </p>
-                    <p className="movement-detail">{item.detail}</p>
+            <div className="ledger grouped-ledger">
+              {Object.entries(groupedFilteredActivity).map(([groupKey, items]) => (
+                <section key={groupKey} className="movement-group">
+                  <div className="movement-group-head">
+                    <strong>{groupKey}</strong>
+                    <span>{items.length} registro(s)</span>
                   </div>
-                  <div className="movement-actions">
-                    <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                      {item.amount >= 0 ? '+' : '-'}
-                      {money.format(Math.abs(item.amount))}
-                    </strong>
-                    {(item.editable || item.deletable) && (
-                      <div className="movement-action-row">
-                        {item.editable && (
-                          <button
-                            type="button"
-                            className="text-link compact"
-                            onClick={() => startEditMovement(item.kind, item.id)}
-                          >
-                            Editar
-                          </button>
-                        )}
-                        {item.deletable && (
-                          <button
-                            type="button"
-                            className="text-link compact danger"
-                            onClick={() => handleDeleteMovement(item.kind, item.id)}
-                          >
-                            Eliminar
-                          </button>
+                  {items.map((item) => (
+                    <article key={item.kind + item.id} className={`ledger-row movement-row ${item.kind}`}>
+                      <div className={`ledger-icon ${item.kind}`}></div>
+                      <div className="ledger-copy">
+                        <strong>{item.title}</strong>
+                        <p>
+                          {item.date} · {item.meta}
+                        </p>
+                        <p className="movement-detail">{item.detail}</p>
+                      </div>
+                      <div className="movement-actions">
+                        <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+                          {item.amount >= 0 ? '+' : '-'}
+                          {money.format(Math.abs(item.amount))}
+                        </strong>
+                        {(item.editable || item.deletable) && (
+                          <div className="movement-action-row">
+                            {item.editable && (
+                              <button
+                                type="button"
+                                className="edit-icon-button inline"
+                                aria-label={`Editar movimiento ${item.title}`}
+                                onClick={() => startEditMovement(item.kind, item.id)}
+                              >
+                                ✎
+                              </button>
+                            )}
+                            {item.deletable && (
+                              <button
+                                type="button"
+                                className="text-link compact danger"
+                                onClick={() => handleDeleteMovement(item.kind, item.id)}
+                              >
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                </article>
+                    </article>
+                  ))}
+                </section>
               ))}
               {filteredActivity.length === 0 && (
                 <p className="empty-copy">No hay movimientos con los filtros seleccionados.</p>
               )}
             </div>
           </section>
-        </div>
+          </div>
 
-        <aside className="secondary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Registrar</span>
-                <h2>Movimiento rapido</h2>
-              </div>
-            </div>
-            <div className="module-segmented">
-              {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
-                <button
-                  key={module}
-                  type="button"
-                  className={module === activeModule ? 'segment active' : 'segment'}
-                  onClick={() => setActiveModule(module)}
-                >
-                  {moduleLabels[module]}
-                </button>
-              ))}
-            </div>
-            {renderActiveForm()}
-          </section>
-
+          <aside className="secondary-column">
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
@@ -2125,7 +2834,7 @@ function App() {
               </div>
             </div>
             <div className="ledger">
-              {monthExpenses.slice(0, 4).map((expense) => (
+              {movementMonthExpenses.slice(0, 4).map((expense) => (
                 <article key={expense.id} className="ledger-row editable">
                   <div className="ledger-copy">
                     <strong>{expense.description}</strong>
@@ -2152,26 +2861,85 @@ function App() {
               ))}
             </div>
           </section>
-        </aside>
-      </section>
+          </aside>
+        </section>
+      </>
     )
   }
 
   function renderProgrammingView() {
     return (
-      <section className="dashboard-grid">
-        <div className="primary-column">
-          <section className="panel banking-panel">
+      <>
+        {openComposer === 'programacion' && (
+          <div className="fullscreen-composer-shell">
+            <div
+              className="fullscreen-composer-backdrop"
+              onClick={() => {
+                resetFixedForm()
+                setOpenComposer(null)
+              }}
+            />
+            <section className="fullscreen-composer-panel banking-panel action-panel">
+              <div className="composer-toolbar fullscreen">
+                <div>
+                  <span className="micro-label">Nueva obligacion</span>
+                  <h2>{fixedForm.id ? 'Editar obligacion' : 'Registrar obligacion'}</h2>
+                  <p>Define monto, bolsillo, categoria y dias de pago y confirmacion.</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button cancel-action"
+                  onClick={() => {
+                    resetFixedForm()
+                    setOpenComposer(null)
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+              <div className="fullscreen-composer-body">{renderActiveForm()}</div>
+            </section>
+          </div>
+        )}
+
+        <section className="dashboard-grid">
+          <div className="primary-column">
+            <section className="panel banking-panel">
             <div className="panel-header">
               <div>
                 <span className="micro-label">Calendario financiero</span>
                 <h2>Obligaciones</h2>
               </div>
-              <p>{fixedStatus.pending.length} pendientes este mes</p>
+              <div className="panel-header-actions">
+                <p>{fixedStatus.pending.length} pendientes este mes</p>
+                <button
+                  className="action-trigger"
+                  type="button"
+                  onClick={() => {
+                    resetFixedForm()
+                    openComposerForView('programacion', 'fijos')
+                  }}
+                >
+                  Registrar obligacion
+                </button>
+              </div>
+            </div>
+            <div className="status-grid obligation-metrics">
+              <div>
+                <span>Activas</span>
+                <strong>{fixedStatus.activeItems.length}</strong>
+              </div>
+              <div>
+                <span>En revision</span>
+                <strong>{fixedStatus.review.length}</strong>
+              </div>
+              <div>
+                <span>Pausadas</span>
+                <strong>{fixedStatus.paused.length}</strong>
+              </div>
             </div>
             <div className="fixed-stack">
               {state.fixedExpenses
-                .filter((item) => item.active)
                 .sort((a, b) => a.dueDay - b.dueDay)
                 .map((item) => {
                   const isPaid = item.lastPaidMonth === currentMonthKey
@@ -2180,56 +2948,43 @@ function App() {
                   return (
                     <article key={item.id} className="fixed-card">
                       <div>
-                        <strong>{item.title}</strong>
+                        <div className="card-title-row">
+                          <strong>{item.title}</strong>
+                          <button
+                            type="button"
+                            className="edit-icon-button"
+                            aria-label={`Editar obligacion ${item.title}`}
+                            onClick={() => startEditFixedExpense(item.id)}
+                          >
+                            ✎
+                          </button>
+                        </div>
                         <p>
                           Pago dia {item.dueDay} · confirmar dia {item.confirmationDay} · {getPocketName(state.pockets, item.pocketId)} · {item.category}
                         </p>
                       </div>
                       <div className="fixed-card-side">
                         <span>{money.format(item.amount)}</span>
-                        <small className={isPaid ? 'paid' : isLate ? 'late' : 'pending'}>
-                          {isPaid ? 'Pagado' : isLate ? 'Vencido' : 'Pendiente'}
+                        <small className={!item.active ? 'paused' : isPaid ? 'paid' : isLate ? 'late' : 'pending'}>
+                          {!item.active ? 'Pausada' : isPaid ? 'Pagado' : isLate ? 'Vencido' : 'Pendiente'}
                         </small>
-                        {!isPaid && (
+                        {item.active && !isPaid && (
                           <button type="button" onClick={() => handlePayFixedExpense(item.id)}>
                             Marcar pago
                           </button>
                         )}
-                        <button type="button" className="secondary-button slim" onClick={() => startEditFixedExpense(item.id)}>
-                          Editar
+                        <button type="button" className="secondary-button slim" onClick={() => handleToggleFixedExpense(item.id)}>
+                          {item.active ? 'Pausar' : 'Reactivar'}
                         </button>
                       </div>
                     </article>
                   )
                 })}
             </div>
-          </section>
-        </div>
-
-        <aside className="secondary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Nueva obligacion</span>
-                <h2>{fixedForm.id ? 'Editar obligacion' : 'Agregar obligacion'}</h2>
-              </div>
-            </div>
-            <div className="module-segmented">
-              {(['fijos', 'ingreso'] as ModuleKey[]).map((module) => (
-                <button
-                  key={module}
-                  type="button"
-                  className={module === activeModule ? 'segment active' : 'segment'}
-                  onClick={() => setActiveModule(module)}
-                >
-                  {moduleLabels[module]}
-                </button>
-              ))}
-            </div>
-            {renderActiveForm()}
-          </section>
-        </aside>
-      </section>
+            </section>
+          </div>
+        </section>
+      </>
     )
   }
 
@@ -2237,13 +2992,136 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          {openComposer === 'deudas' && (
+            <section className="panel banking-panel action-panel">
+              <div className="composer-toolbar">
+                <div>
+                  <span className="micro-label">Nueva deuda</span>
+                  <h2>Registrar deuda</h2>
+                  <p>Define saldo total, cuota estimada, bolsillo pagador y categoria asociada.</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button cancel-action"
+                  onClick={() => {
+                    resetDebtForm()
+                    setOpenComposer(null)
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+              <form className="bank-form" onSubmit={handleAddDebt}>
+                <label>
+                  Nombre de la deuda
+                  <input
+                    value={debtForm.title}
+                    onChange={(event) => setDebtForm((current) => ({ ...current, title: event.target.value }))}
+                    placeholder="Ej. credito, prestamo, tarjeta"
+                  />
+                </label>
+                <div className="form-grid two">
+                  <label>
+                    Total de la deuda
+                    <input
+                      type="number"
+                      value={debtForm.totalAmount}
+                      onChange={(event) =>
+                        setDebtForm((current) => ({ ...current, totalAmount: event.target.value }))
+                      }
+                      placeholder="2400000"
+                    />
+                  </label>
+                  <label>
+                    Cuota por pago
+                    <input
+                      type="number"
+                      value={debtForm.installmentAmount}
+                      onChange={(event) =>
+                        setDebtForm((current) => ({ ...current, installmentAmount: event.target.value }))
+                      }
+                      placeholder="400000"
+                    />
+                  </label>
+                </div>
+                <div className="form-grid three">
+                  <label>
+                    Dia de pago
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={debtForm.dueDay}
+                      onChange={(event) => setDebtForm((current) => ({ ...current, dueDay: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Bolsillo pagador
+                    <select
+                      value={debtForm.pocketId}
+                      onChange={(event) =>
+                        setDebtForm((current) => ({ ...current, pocketId: event.target.value }))
+                      }
+                    >
+                      {state.pockets.map((pocket) => (
+                        <option key={pocket.id} value={pocket.id}>
+                          {pocket.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Categoria
+                    <select
+                      value={debtForm.category}
+                      onChange={(event) =>
+                        setDebtForm((current) => ({ ...current, category: event.target.value as Category }))
+                      }
+                    >
+                      {state.categories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <button type="submit">{debtForm.id ? 'Guardar deuda' : 'Crear deuda'}</button>
+                {debtForm.id && (
+                  <button
+                    type="button"
+                    className="secondary-button cancel-action"
+                    onClick={() => {
+                      resetDebtForm()
+                      setOpenComposer(null)
+                    }}
+                  >
+                    Cancelar edicion
+                  </button>
+                )}
+              </form>
+            </section>
+          )}
+
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
                 <span className="micro-label">Obligaciones amortizables</span>
                 <h2>Deudas activas</h2>
               </div>
-              <p>{activeDebts.length} activa(s)</p>
+              <div className="panel-header-actions">
+                <p>{activeDebts.length} activa(s)</p>
+                <button
+                  className="action-trigger"
+                  type="button"
+                  onClick={() => {
+                    resetDebtForm()
+                    openComposerForView('deudas')
+                  }}
+                >
+                  Registrar deuda
+                </button>
+              </div>
             </div>
             <div className="debt-stack">
               {activeDebts.map((debt) => {
@@ -2255,7 +3133,17 @@ function App() {
                   <article key={debt.id} className="debt-card">
                     <div className="debt-card-top">
                       <div>
-                        <strong>{debt.title}</strong>
+                        <div className="card-title-row">
+                          <strong>{debt.title}</strong>
+                          <button
+                            type="button"
+                            className="edit-icon-button"
+                            aria-label={`Editar deuda ${debt.title}`}
+                            onClick={() => startEditDebt(debt.id)}
+                          >
+                            ✎
+                          </button>
+                        </div>
                         <p>
                           Cuota {money.format(debt.installmentAmount)} · dia {debt.dueDay} ·{' '}
                           {getPocketName(state.pockets, debt.pocketId)}
@@ -2274,11 +3162,86 @@ function App() {
                         Pagado {money.format(debt.totalAmount - debt.remainingAmount)} de{' '}
                         {money.format(debt.totalAmount)}
                       </p>
+                      <p className="movement-detail">
+                        Cierre estimado:{' '}
+                        {getMonthKeyFromOffset(
+                          currentMonthKey,
+                          Math.max(0, Math.ceil(debt.remainingAmount / Math.max(1, debt.installmentAmount)) - 1),
+                        )}
+                      </p>
                     </div>
                     <div className="debt-actions">
-                      <button type="button" onClick={() => handlePayDebt(debt.id)}>
-                        Registrar abono
+                      <button
+                        type="button"
+                        className="action-trigger debt-trigger"
+                        onClick={() =>
+                          setOpenDebtPaymentId((current) => (current === debt.id ? null : debt.id))
+                        }
+                      >
+                        Ingresar cuota o abono
                       </button>
+                    </div>
+                    {openDebtPaymentId === debt.id && (
+                      <div className="debt-entry-panel">
+                        <div className="debt-entry-head">
+                          <div>
+                            <span className="micro-label">Registro de pago</span>
+                            <strong>Ingresa una cuota o un abono extraordinario</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="edit-icon-button inline"
+                            aria-label={`Cancelar ingreso de pago para ${debt.title}`}
+                            onClick={() => setOpenDebtPaymentId(null)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <label>
+                          Valor a registrar
+                          <input
+                            type="number"
+                            value={debtPaymentDrafts[debt.id] ?? String(debt.installmentAmount)}
+                            onChange={(event) =>
+                              setDebtPaymentDrafts((current) => ({
+                                ...current,
+                                [debt.id]: event.target.value,
+                              }))
+                            }
+                            placeholder={String(debt.installmentAmount)}
+                          />
+                        </label>
+                        <p className="debt-entry-help">
+                          Cuota sugerida: {money.format(debt.installmentAmount)}. Puedes registrar un valor menor o un abono extraordinario.
+                        </p>
+                        <div className="debt-entry-actions">
+                          <button type="button" className="action-trigger debt-submit" onClick={() => handlePayDebt(debt.id, 'scheduled')}>
+                            Registrar cuota
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button slim debt-secondary-action"
+                            onClick={() => handlePayDebt(debt.id, 'extra')}
+                          >
+                            Registrar abono extra
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button slim debt-cancel-action"
+                            onClick={() => setOpenDebtPaymentId(null)}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="debt-history">
+                      {(debtPaymentHistory[debt.id] ?? []).slice(0, 3).map((payment) => (
+                        <div key={payment.id} className="history-chip">
+                          <span>{payment.kind === 'extra' ? 'Abono extra' : 'Cuota'} · {payment.date}</span>
+                          <strong>{money.format(payment.amount)}</strong>
+                        </div>
+                      ))}
                     </div>
                   </article>
                 )
@@ -2290,95 +3253,71 @@ function App() {
               )}
             </div>
           </section>
-        </div>
 
-        <aside className="secondary-column">
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Nueva deuda</span>
-                <h2>Agregar obligacion</h2>
+                <span className="micro-label">Historial</span>
+                <h2>Deudas pagadas</h2>
               </div>
+              <p>{completedDebts.length} saldada(s)</p>
             </div>
-            <form className="bank-form" onSubmit={handleAddDebt}>
-              <label>
-                Nombre de la deuda
-                <input
-                  value={debtForm.title}
-                  onChange={(event) => setDebtForm((current) => ({ ...current, title: event.target.value }))}
-                  placeholder="Ej. credito, prestamo, tarjeta"
-                />
-              </label>
-              <div className="form-grid two">
-                <label>
-                  Total de la deuda
-                  <input
-                    type="number"
-                    value={debtForm.totalAmount}
-                    onChange={(event) =>
-                      setDebtForm((current) => ({ ...current, totalAmount: event.target.value }))
-                    }
-                    placeholder="2400000"
-                  />
-                </label>
-                <label>
-                  Cuota por pago
-                  <input
-                    type="number"
-                    value={debtForm.installmentAmount}
-                    onChange={(event) =>
-                      setDebtForm((current) => ({ ...current, installmentAmount: event.target.value }))
-                    }
-                    placeholder="400000"
-                  />
-                </label>
-              </div>
-              <div className="form-grid three">
-                <label>
-                  Dia de pago
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={debtForm.dueDay}
-                    onChange={(event) => setDebtForm((current) => ({ ...current, dueDay: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Bolsillo pagador
-                  <select
-                    value={debtForm.pocketId}
-                    onChange={(event) =>
-                      setDebtForm((current) => ({ ...current, pocketId: event.target.value }))
-                    }
-                  >
-                    {state.pockets.map((pocket) => (
-                      <option key={pocket.id} value={pocket.id}>
-                        {pocket.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Categoria
-                  <select
-                    value={debtForm.category}
-                    onChange={(event) =>
-                      setDebtForm((current) => ({ ...current, category: event.target.value as Category }))
-                    }
-                  >
-                    {state.categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <button type="submit">Crear deuda</button>
-            </form>
-          </section>
+            <div className="debt-stack">
+              {completedDebts.map((debt) => {
+                const payments = debtPaymentHistory[debt.id] ?? []
+                const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0)
+                const lastPaymentDate = payments[0]?.date ?? 'Sin pagos'
 
+                return (
+                  <details key={debt.id} className="debt-history-card">
+                    <summary className="debt-history-summary">
+                      <div>
+                        <strong>{debt.title}</strong>
+                        <p>
+                          {payments.length} cuota(s) / abono(s) · ultima fecha {lastPaymentDate}
+                        </p>
+                      </div>
+                      <div className="debt-card-side">
+                        <span>{money.format(totalPaid)}</span>
+                        <small>Saldada</small>
+                      </div>
+                    </summary>
+                    <div className="debt-history-body">
+                      <div className="status-grid debt-history-metrics">
+                        <div>
+                          <span>Total deuda</span>
+                          <strong>{money.format(debt.totalAmount)}</strong>
+                        </div>
+                        <div>
+                          <span>Numero de pagos</span>
+                          <strong>{payments.length}</strong>
+                        </div>
+                      </div>
+                      <div className="debt-history-list">
+                        {payments.map((payment, index) => (
+                          <div key={payment.id} className="history-chip">
+                            <span>
+                              Pago {payments.length - index} · {payment.kind === 'extra' ? 'Abono extra' : 'Cuota'} · {payment.date}
+                            </span>
+                            <strong>{money.format(payment.amount)}</strong>
+                          </div>
+                        ))}
+                        {payments.length === 0 && (
+                          <p className="empty-copy">No hay historial detallado de pagos para esta deuda.</p>
+                        )}
+                      </div>
+                    </div>
+                  </details>
+                )
+              })}
+              {completedDebts.length === 0 && (
+                <p className="empty-copy">Aun no tienes deudas saldadas en el historial.</p>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <aside className="secondary-column">
           <section className="panel banking-panel emphasis">
             <span className="micro-label">Resumen de deuda</span>
             <h2>Saldo pendiente</h2>
@@ -2391,6 +3330,10 @@ function App() {
               <div>
                 <span>Activas</span>
                 <strong>{activeDebts.length}</strong>
+              </div>
+              <div>
+                <span>Saldadas</span>
+                <strong>{completedDebts.length}</strong>
               </div>
             </div>
           </section>
@@ -2434,67 +3377,209 @@ function App() {
               ))}
             </div>
           </section>
-        </div>
 
-        <aside className="secondary-column">
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Aplicacion</span>
-                <h2>Parametros generales</h2>
+                <span className="micro-label">IA</span>
+                <h2>Reglas de aprendizaje</h2>
+              </div>
+            </div>
+            <div className="settings-chip-grid">
+              {state.learningRules.map((rule) => (
+                <div key={rule.keyword} className="settings-chip">
+                  <span>
+                    {rule.keyword} → {rule.category} · {rule.hits} acierto(s)
+                  </span>
+                  <button
+                    type="button"
+                    className="text-link compact"
+                    onClick={() => handleRemoveLearningRule(rule.keyword)}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ))}
+              {state.learningRules.length === 0 && (
+                <p className="empty-copy">Todavia no hay reglas aprendidas por correcciones manuales.</p>
+              )}
+            </div>
+          </section>
+
+          {isAdminUser && (
+            <section className="panel banking-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Administrador</span>
+                  <h2>Gestion de usuarios</h2>
+                </div>
+                <div className="panel-header-actions">
+                  <p>{managedUsers.length} usuario(s)</p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setUsersFeedback(null)
+                      setShowUserAdminForm(true)
+                      setUserAdminForm({
+                        username: '',
+                        cedula: '',
+                        nombre: '',
+                        password: '',
+                        typeuser: 'user',
+                        editingUsername: '',
+                      })
+                    }}
+                  >
+                    Nuevo usuario
+                  </button>
+                </div>
+              </div>
+              {showUserAdminForm && (
+              <form className="bank-form user-admin-form" onSubmit={handleSubmitManagedUser}>
+                <div className="form-grid three">
+                  <label>
+                    Username
+                    <input
+                      value={userAdminForm.username}
+                      onChange={(event) =>
+                        setUserAdminForm((current) => ({ ...current, username: event.target.value }))
+                      }
+                      placeholder="usuario_admin"
+                    />
+                  </label>
+                  <label>
+                    Cedula
+                    <input
+                      value={userAdminForm.cedula}
+                      onChange={(event) =>
+                        setUserAdminForm((current) => ({ ...current, cedula: event.target.value }))
+                      }
+                      placeholder="1234567890"
+                    />
+                  </label>
+                  <label>
+                    Nombre
+                    <input
+                      value={userAdminForm.nombre}
+                      onChange={(event) =>
+                        setUserAdminForm((current) => ({ ...current, nombre: event.target.value }))
+                      }
+                      placeholder="Nombre del usuario"
+                    />
+                  </label>
+                  <label>
+                    Contrasena
+                    <input
+                      value={userAdminForm.password}
+                      onChange={(event) =>
+                        setUserAdminForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Contrasena inicial"
+                    />
+                  </label>
+                </div>
+                <label className="toggle-row">
+                  <span>Typeuser</span>
+                  <select
+                    value={userAdminForm.typeuser}
+                    onChange={(event) =>
+                      setUserAdminForm((current) => ({
+                        ...current,
+                        typeuser: event.target.value as 'admin' | 'user',
+                      }))
+                    }
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+                <button type="submit" disabled={usersLoading}>
+                  {userAdminForm.editingUsername ? 'Guardar cambios' : 'Crear usuario'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button cancel-action"
+                  onClick={() => resetUserAdminForm()}
+                >
+                  Cancelar
+                </button>
+              </form>
+              )}
+              {usersFeedback && <p className="movement-detail admin-feedback">{usersFeedback}</p>}
+              <div className="managed-users-grid">
+                {managedUsers.map((managedUser) => (
+                  <article key={managedUser.username} className="managed-user-card">
+                    <div className="card-title-row">
+                      <div>
+                        <strong>{managedUser.nombre || `Usuario ${managedUser.cedula}`}</strong>
+                        <p>@{managedUser.username}</p>
+                        <p>{managedUser.cedula}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="edit-icon-button"
+                        aria-label={`Editar usuario ${managedUser.username}`}
+                        onClick={() => startEditManagedUser(managedUser.username)}
+                      >
+                        ✎
+                      </button>
+                    </div>
+                    <div className="managed-user-meta">
+                      <span>{managedUser.typeuser === 'admin' ? 'admin' : 'user'}</span>
+                      <strong>Clave: {managedUser.password}</strong>
+                    </div>
+                  </article>
+                ))}
+                {managedUsers.length === 0 && !usersLoading && (
+                  <p className="empty-copy">Todavia no hay usuarios registrados en el panel.</p>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className="secondary-column">
+          <section className="panel banking-panel emphasis">
+            <span className="micro-label">Persistencia</span>
+            <h2>Estado de sincronizacion</h2>
+            <p>
+              {supabaseConfigured
+                ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
+                : 'Supabase aun no esta configurado. La app opera en modo local.'}
+            </p>
+            <div className="status-grid">
+              <div>
+                <span>Origen</span>
+                <strong>{syncSource}</strong>
+              </div>
+              <div>
+                <span>Ultimo guardado</span>
+                <strong>{lastSyncedAt ? lastSyncedAt.slice(0, 16).replace('T', ' ') : 'Pendiente'}</strong>
+              </div>
+            </div>
+            {syncError && <p className="movement-detail">{syncError}</p>}
+          </section>
+
+          <section className="panel banking-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Bolsillos</span>
+                <h2>Etiquetas de tipos de bolsillo</h2>
               </div>
             </div>
             <form className="bank-form">
-              <label>
-                Nombre de la aplicacion
-                <input
-                  value={state.config.appName}
-                  onChange={(event) => updateConfig('appName', event.target.value)}
-                />
-              </label>
-              <div className="form-grid two">
-                <label>
-                  Moneda
-                  <select
-                    value={state.config.currency}
-                    onChange={(event) => updateConfig('currency', event.target.value)}
-                  >
-                    <option value="COP">COP</option>
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
-                  </select>
-                </label>
-                <label>
-                  Idioma regional
-                  <select
-                    value={state.config.locale}
-                    onChange={(event) => updateConfig('locale', event.target.value)}
-                  >
-                    <option value="es-CO">es-CO</option>
-                    <option value="es-ES">es-ES</option>
-                    <option value="en-US">en-US</option>
-                  </select>
-                </label>
-              </div>
-              <label>
-                Dia base de inicio de ciclo
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={state.config.paydayStartDay}
-                  onChange={(event) => updateConfig('paydayStartDay', Number(event.target.value))}
-                />
-              </label>
               <div className="settings-group">
-                <span className="micro-label">Etiquetas de tipos de bolsillo</span>
+                <p className="movement-detail">
+                  Aqui defines el nombre oficial de cada tipo de bolsillo. No se manejan alias adicionales.
+                </p>
                 <div className="form-grid two">
                   <label>
                     Operacion
                     <input
                       value={state.config.pocketTypeLabels.daily}
                       onChange={(event) =>
-                        updateConfig('pocketTypeLabels', {
+                        updatePocketTypeLabels({
                           ...state.config.pocketTypeLabels,
                           daily: event.target.value,
                         })
@@ -2506,7 +3591,7 @@ function App() {
                     <input
                       value={state.config.pocketTypeLabels.savings}
                       onChange={(event) =>
-                        updateConfig('pocketTypeLabels', {
+                        updatePocketTypeLabels({
                           ...state.config.pocketTypeLabels,
                           savings: event.target.value,
                         })
@@ -2518,7 +3603,7 @@ function App() {
                     <input
                       value={state.config.pocketTypeLabels.fixed}
                       onChange={(event) =>
-                        updateConfig('pocketTypeLabels', {
+                        updatePocketTypeLabels({
                           ...state.config.pocketTypeLabels,
                           fixed: event.target.value,
                         })
@@ -2530,7 +3615,7 @@ function App() {
                     <input
                       value={state.config.pocketTypeLabels.invest}
                       onChange={(event) =>
-                        updateConfig('pocketTypeLabels', {
+                        updatePocketTypeLabels({
                           ...state.config.pocketTypeLabels,
                           invest: event.target.value,
                         })
@@ -2559,16 +3644,141 @@ function App() {
               ? 'Seguimiento de deudas hasta saldo cero'
             : 'Categorias y parametros generales de la aplicacion'
 
+  if (auth.isConfigured && auth.isLoading) {
+    return (
+      <main className="banking-app loading-shell">
+        <section className="workspace">
+          <div className="panel banking-panel emphasis">
+            <span className="micro-label">Usuarios</span>
+            <h1>Validando acceso</h1>
+            <p>Estoy conectando tu username con la base de datos.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (auth.isConfigured && !auth.user) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="auth-brand">
+            <div className="brand-mark">F</div>
+            <div>
+              <strong>MoneyApp</strong>
+              <p>Acceso seguro a tu perfil financiero</p>
+            </div>
+          </div>
+
+          <div className="auth-copy">
+            <span className="micro-label">Usuarios publicos</span>
+            <h1>{authMode === 'login' ? 'Inicia sesion con tu username' : 'Crea tu usuario'}</h1>
+            <p>
+              Cada username tendra su propio perfil, asociado a una cedula, bolsillos, obligaciones, deudas y movimientos.
+            </p>
+          </div>
+
+          <form className="bank-form auth-form" onSubmit={handleAuthSubmit}>
+            <label>
+              Username
+              <input
+                value={authForm.username}
+                onChange={(event) =>
+                  setAuthForm((current) => ({ ...current, username: event.target.value }))
+                }
+                placeholder="usuario_admin"
+              />
+            </label>
+            {authMode === 'register' && (
+              <label>
+                Cedula
+                <input
+                  inputMode="numeric"
+                  value={authForm.cedula}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({ ...current, cedula: event.target.value }))
+                  }
+                  placeholder="1234567890"
+                />
+              </label>
+            )}
+            <label>
+              Contrasena
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(event) =>
+                  setAuthForm((current) => ({ ...current, password: event.target.value }))
+                }
+                placeholder={authMode === 'login' ? 'Ingresa tu contrasena' : 'Define la contrasena inicial'}
+              />
+            </label>
+            <button type="submit" disabled={isSubmittingAuth}>
+              {isSubmittingAuth
+                ? 'Procesando...'
+                : authMode === 'login'
+                  ? 'Ingresar'
+                  : 'Crear usuario simple'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setAuthMode((current) => (current === 'login' ? 'register' : 'login'))
+                setAuthFeedback(null)
+              }}
+            >
+              {authMode === 'login' ? 'Crear cuenta' : 'Ya tengo cuenta'}
+            </button>
+          </form>
+
+          {(authFeedback || auth.authError) && (
+            <div className="auth-feedback">
+              <p>{authFeedback ?? auth.authError}</p>
+            </div>
+          )}
+        </section>
+      </main>
+    )
+  }
+
+  if (!isReady) {
+    return (
+      <main className="banking-app loading-shell">
+        <section className="workspace">
+          <div className="panel banking-panel emphasis">
+            <span className="micro-label">Inicializando</span>
+            <h1>Cargando datos financieros</h1>
+            <p>Estoy preparando la informacion local y la capa de sincronizacion.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="banking-app">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">F</div>
           <div>
-            <strong>FinPilot</strong>
+            <strong>MoneyApp</strong>
             <p>Control financiero</p>
           </div>
         </div>
+
+        {auth.user && (
+          <section className="sidebar-card">
+            <span className="micro-label">Usuario</span>
+            <strong>{auth.user.nombre || `@${auth.user.username}`}</strong>
+            <p>@{auth.user.username}</p>
+            <p>{auth.user.cedula}</p>
+            <p>{auth.user.typeuser ?? 'user'}</p>
+            <button type="button" className="secondary-button cancel-action" onClick={() => auth.signOut()}>
+              Cerrar sesion
+            </button>
+          </section>
+        )}
 
         <nav className="sidebar-nav">
           {(Object.keys(viewLabels) as ViewKey[]).map((view) => (
@@ -2592,6 +3802,7 @@ function App() {
         <section className="sidebar-card muted">
           <span className="micro-label">Recomendacion</span>
           <p>{coachingMessage}</p>
+          <small>Persistencia: {supabaseConfigured ? `Supabase + ${syncSource}` : 'localStorage'}</small>
         </section>
       </aside>
 
