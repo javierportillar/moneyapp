@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
-import { isSupabaseConfigured, supabase } from '../services/supabaseClient'
+import { getSupabaseClient, isSupabaseConfigured } from '../services/supabaseClient'
 
 export function useSupabaseAuth() {
   const [session, setSession] = useState<Session | null>(null)
@@ -9,6 +9,7 @@ export function useSupabaseAuth() {
   const [authError, setAuthError] = useState<string | null>(null)
 
   useEffect(() => {
+    const supabase = getSupabaseClient()
     if (!supabase) {
       setIsLoading(false)
       return
@@ -18,7 +19,7 @@ export function useSupabaseAuth() {
 
     supabase.auth
       .getSession()
-      .then(({ data, error }) => {
+      .then(({ data, error }: { data: any; error: any }) => {
         if (!active) return
         if (error) {
           setAuthError(error.message)
@@ -28,13 +29,13 @@ export function useSupabaseAuth() {
         }
         setIsLoading(false)
       })
-      .catch((error) => {
+      .catch((error: any) => {
         if (!active) return
         setAuthError(error instanceof Error ? error.message : 'No se pudo validar la sesion.')
         setIsLoading(false)
       })
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((_event: any, nextSession: any) => {
       setSession(nextSession)
       setUser(nextSession?.user ?? null)
       setAuthError(null)
@@ -48,18 +49,21 @@ export function useSupabaseAuth() {
   }, [])
 
   async function signIn(email: string, password: string) {
+    const supabase = getSupabaseClient()
     if (!supabase) return { error: 'Supabase no esta configurado.' }
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return { error: error?.message ?? null }
   }
 
   async function signUp(email: string, password: string) {
+    const supabase = getSupabaseClient()
     if (!supabase) return { error: 'Supabase no esta configurado.' }
     const { error } = await supabase.auth.signUp({ email, password })
     return { error: error?.message ?? null }
   }
 
   async function signOut() {
+    const supabase = getSupabaseClient()
     if (!supabase) return
     await supabase.auth.signOut()
   }

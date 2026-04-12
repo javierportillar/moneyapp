@@ -1,197 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { FullscreenComposer } from './components/FullscreenComposer'
+import {
+  categoryKeywords,
+  defaultCategories,
+  initialState,
+  moduleLabels,
+  pocketIcons,
+  STORAGE_KEY,
+  viewLabels,
+} from './domain/finance/constants'
+import type {
+  AppConfig,
+  AppState,
+  Category,
+  ComposerView,
+  Debt,
+  DebtPayment,
+  Expense,
+  FixedExpense,
+  Income,
+  LearningRule,
+  ModuleKey,
+  MovementKind,
+  Pocket,
+  PocketType,
+  Transfer,
+  ViewKey,
+} from './domain/finance/types'
 import { usePersistentSnapshot } from './hooks/usePersistentSnapshot'
 import { useSimpleUsersAuth } from './hooks/useSimpleUsersAuth'
 import { createSupabaseFinanceDriver } from './services/supabaseFinance'
-import { supabase } from './services/supabaseClient'
-
-type PocketType = 'daily' | 'savings' | 'fixed' | 'invest'
-type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion'
-type ModuleKey = 'gasto' | 'ingreso' | 'transferencia' | 'fijos' | 'bolsillos'
-type MovementKind = 'gasto' | 'ingreso' | 'transferencia'
-type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas'
-
-type Pocket = {
-  id: string
-  name: string
-  balance: number
-  color: string
-  icon: string
-  type: PocketType
-}
-
-type Category = string
-
-type Expense = {
-  id: string
-  description: string
-  amount: number
-  pocketId: string
-  date: string
-  source: 'manual' | 'wallet' | 'fixed' | 'debt'
-  category: Category
-  confidence: number
-}
-
-type Debt = {
-  id: string
-  title: string
-  totalAmount: number
-  remainingAmount: number
-  installmentAmount: number
-  dueDay: number
-  pocketId: string
-  category: Category
-  active: boolean
-}
-
-type DebtPayment = {
-  id: string
-  debtId: string
-  amount: number
-  date: string
-  kind: 'scheduled' | 'extra'
-}
-
-type Income = {
-  id: string
-  title: string
-  amount: number
-  pocketId: string
-  date: string
-  recurring: boolean
-}
-
-type Transfer = {
-  id: string
-  fromPocketId: string
-  toPocketId: string
-  amount: number
-  date: string
-  note: string
-}
-
-type FixedExpense = {
-  id: string
-  title: string
-  amount: number
-  dueDay: number
-  confirmationDay: number
-  pocketId: string
-  category: Category
-  active: boolean
-  lastPaidMonth?: string
-}
-
-type LearningRule = {
-  keyword: string
-  category: Category
-  hits: number
-}
-
-type MonthClosure = {
-  monthKey: string
-  closedAt: string
-  income: number
-  expense: number
-  netFlow: number
-  pocketBalance: number
-  pendingDebt: number
-  pendingFixed: number
-}
-
-type AppConfig = {
-  pocketTypeLabels: Record<PocketType, string>
-}
-
-type AppState = {
-  pockets: Pocket[]
-  expenses: Expense[]
-  incomes: Income[]
-  transfers: Transfer[]
-  fixedExpenses: FixedExpense[]
-  debts: Debt[]
-  debtPayments: DebtPayment[]
-  monthClosures: MonthClosure[]
-  learningRules: LearningRule[]
-  categories: Category[]
-  config: AppConfig
-}
-
-const STORAGE_KEY = 'finpilot-v2'
-const pocketIcons = ['💼', '🏠', '🛒', '💳', '🧾', '🎯', '✈️', '🛡️', '📈', '💰']
-const defaultCategories = [
-  'Hogar',
-  'Comida',
-  'Transporte',
-  'Salud',
-  'Entretenimiento',
-  'Suscripciones',
-  'Ahorro',
-  'Inversion',
-  'Educacion',
-  'Servicios',
-  'Compras',
-  'Otros',
-] as const
-
-const categoryKeywords: Record<string, string[]> = {
-  Hogar: ['arriendo', 'renta', 'hogar', 'limpieza', 'ikea'],
-  Comida: ['restaurante', 'almuerzo', 'cafe', 'mercado', 'super', 'carulla', 'uber eats'],
-  Transporte: ['uber', 'didi', 'gasolina', 'peaje', 'metro', 'parking'],
-  Salud: ['farmacia', 'medicina', 'doctor', 'clinica', 'salud'],
-  Entretenimiento: ['cine', 'bar', 'netflix', 'spotify', 'ticket', 'gaming'],
-  Suscripciones: ['notion', 'icloud', 'adobe', 'openai', 'youtube', 'membresia'],
-  Ahorro: ['ahorro', 'reserva', 'fondo'],
-  Inversion: ['broker', 'etf', 'accion', 'crypto', 'inversion'],
-  Educacion: ['curso', 'platzi', 'udemy', 'libro', 'academia'],
-  Servicios: ['internet', 'agua', 'luz', 'energia', 'telefono'],
-  Compras: ['amazon', 'falabella', 'exito', 'compra', 'tienda'],
-  Otros: [],
-}
-
-const initialState: AppState = {
-  pockets: [
-    { id: 'p1', name: 'Operacion', balance: 0, color: '#0f766e', icon: '💼', type: 'daily' },
-    { id: 'p2', name: 'Colchon', balance: 0, color: '#1d4ed8', icon: '🛡️', type: 'savings' },
-    { id: 'p3', name: 'Pagos fijos', balance: 0, color: '#f59e0b', icon: '🧾', type: 'fixed' },
-    { id: 'p4', name: 'Meta viaje', balance: 0, color: '#7c3aed', icon: '✈️', type: 'invest' },
-  ],
-  fixedExpenses: [],
-  debts: [],
-  debtPayments: [],
-  monthClosures: [],
-  incomes: [],
-  transfers: [],
-  expenses: [],
-  learningRules: [],
-  categories: [...defaultCategories],
-  config: {
-    pocketTypeLabels: {
-      daily: 'Operacion',
-      savings: 'Ahorro',
-      fixed: 'Pagos fijos',
-      invest: 'Meta o inversion',
-    },
-  },
-}
-
-const moduleLabels: Record<ModuleKey, string> = {
-  gasto: 'Registrar gasto',
-  ingreso: 'Registrar ingreso',
-  transferencia: 'Transferencia',
-  fijos: 'Obligaciones',
-  bolsillos: 'Bolsillos',
-}
-
-const viewLabels: Record<ViewKey, string> = {
-  resumen: 'Resumen',
-  bolsillos: 'Bolsillos',
-  movimientos: 'Movimientos',
-  programacion: 'Obligaciones',
-  deudas: 'Deudas',
-  configuracion: 'Configuracion',
-}
+import { getSupabaseClient } from './services/supabaseClient'
 
 const money = new Intl.NumberFormat('es-CO', {
   style: 'currency',
@@ -282,7 +122,25 @@ function getDefaultIcon(type: PocketType) {
   return '🎯'
 }
 
+function getViewIcon(view: ViewKey) {
+  if (view === 'resumen') return '◫'
+  if (view === 'bolsillos') return '◉'
+  if (view === 'movimientos') return '↕'
+  if (view === 'programacion') return '◷'
+  if (view === 'deudas') return '¤'
+  return '⚙'
+}
+
 function hydrateState(raw: AppState) {
+  const safePockets =
+    raw.pockets?.length
+      ? raw.pockets.map((pocket) => ({
+          ...pocket,
+          balance: 0,
+          icon: pocket.icon ?? getDefaultIcon(pocket.type),
+        }))
+      : initialState.pockets.map((pocket) => ({ ...pocket }))
+
   return {
     ...raw,
     categories: raw.categories?.length ? raw.categories : [...defaultCategories],
@@ -295,15 +153,15 @@ function hydrateState(raw: AppState) {
     debts: raw.debts ?? initialState.debts,
     debtPayments: raw.debtPayments ?? initialState.debtPayments,
     monthClosures: raw.monthClosures ?? initialState.monthClosures,
+    incomes: raw.incomes ?? initialState.incomes,
+    transfers: raw.transfers ?? initialState.transfers,
+    expenses: raw.expenses ?? initialState.expenses,
+    learningRules: raw.learningRules ?? initialState.learningRules,
     fixedExpenses: (raw.fixedExpenses ?? initialState.fixedExpenses).map((item) => ({
       ...item,
       active: item.active ?? true,
     })),
-    pockets: raw.pockets.map((pocket) => ({
-      ...pocket,
-      balance: 0,
-      icon: pocket.icon ?? getDefaultIcon(pocket.type),
-    })),
+    pockets: safePockets,
   }
 }
 
@@ -313,7 +171,7 @@ function App() {
   const currentMonthKey = today.slice(0, 7)
   const currentDay = now.getDate()
   const auth = useSimpleUsersAuth()
-  const remoteDriver = createSupabaseFinanceDriver<AppState>(auth.user?.cedula)
+  const remoteDriver = createSupabaseFinanceDriver<AppState>(auth.user?.id)
   const {
     state,
     setState,
@@ -337,6 +195,7 @@ function App() {
   const [authForm, setAuthForm] = useState({ username: '', cedula: '', password: '' })
   const [authFeedback, setAuthFeedback] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const [showAuthPassword, setShowAuthPassword] = useState(false)
   const isAdminUser = auth.user?.typeuser === 'admin'
 
   useEffect(() => {
@@ -348,6 +207,13 @@ function App() {
       resetUserAdminForm()
     }
   }, [isAdminUser])
+
+  useEffect(() => {
+    if (!state.pockets.length) return
+    if (!state.pockets.some((pocket) => pocket.id === selectedPocketId)) {
+      setSelectedPocketId(state.pockets[0].id)
+    }
+  }, [selectedPocketId, state.pockets])
 
   const [expenseForm, setExpenseForm] = useState({
     id: '',
@@ -393,15 +259,11 @@ function App() {
     pocketId: string
     kind: 'todos' | MovementKind
     query: string
-    dateFrom: string
-    dateTo: string
     groupBy: 'dia' | 'mes'
   }>({
     pocketId: 'todos',
     kind: 'todos',
     query: '',
-    dateFrom: '',
-    dateTo: '',
     groupBy: 'dia',
   })
   const [movementMonthKey, setMovementMonthKey] = useState(currentMonthKey)
@@ -416,12 +278,18 @@ function App() {
   })
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
+  const [fixedPaymentDraft, setFixedPaymentDraft] = useState<{
+    fixedId: string
+    pocketId: string
+    paymentDate: string
+  } | null>(null)
   const [managedUsers, setManagedUsers] = useState<
     Array<{ username: string; cedula: string; nombre: string | null; password: string; typeuser: 'admin' | 'user' }>
   >([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [usersFeedback, setUsersFeedback] = useState<string | null>(null)
   const [showUserAdminForm, setShowUserAdminForm] = useState(false)
+  const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
     cedula: '',
@@ -477,6 +345,14 @@ function App() {
     () => state.debts.filter((debt) => debt.remainingAmount <= 0),
     [state.debts],
   )
+  const monthlyDebtCommitment = useMemo(
+    () =>
+      activeDebts.reduce(
+        (sum, debt) => sum + Math.min(debt.installmentAmount, Math.max(0, debt.remainingAmount)),
+        0,
+      ),
+    [activeDebts],
+  )
 
   const pocketBalances = useMemo(() => {
     const balances = Object.fromEntries(state.pockets.map((pocket) => [pocket.id, 0]))
@@ -506,6 +382,43 @@ function App() {
     const review = pending.filter((item) => item.confirmationDay <= currentDay)
     return { activeItems, paid, pending, overdue, paused, review }
   }, [currentDay, currentMonthKey, state.fixedExpenses])
+
+  const obligationSummary = useMemo(() => {
+    const totalActiveAmount = fixedStatus.activeItems.reduce((sum, item) => sum + item.amount, 0)
+    const totalPendingAmount = fixedStatus.pending.reduce((sum, item) => sum + item.amount, 0)
+
+    const byDueDay = fixedStatus.activeItems.reduce<Record<number, number>>((acc, item) => {
+      acc[item.dueDay] = (acc[item.dueDay] ?? 0) + item.amount
+      return acc
+    }, {})
+
+    const heaviestDueDay =
+      Object.entries(byDueDay)
+        .map(([day, total]) => ({ day: Number(day), total }))
+        .sort((a, b) => b.total - a.total)[0] ?? null
+
+    const nextDeadlines = fixedStatus.pending
+      .slice()
+      .sort((a, b) => a.dueDay - b.dueDay)
+      .slice(0, 4)
+
+    const nextConfirmations = fixedStatus.pending
+      .slice()
+      .sort((a, b) => a.confirmationDay - b.confirmationDay)
+      .slice(0, 4)
+
+    const highestObligation =
+      fixedStatus.activeItems.slice().sort((a, b) => b.amount - a.amount)[0] ?? null
+
+    return {
+      totalActiveAmount,
+      totalPendingAmount,
+      heaviestDueDay,
+      nextDeadlines,
+      nextConfirmations,
+      highestObligation,
+    }
+  }, [fixedStatus.activeItems, fixedStatus.pending])
 
   const totals = useMemo(() => {
     const pocketBalance = Object.values(pocketBalances).reduce((sum, balance) => sum + balance, 0)
@@ -647,9 +560,7 @@ function App() {
         const matchesQuery =
           !movementFilters.query ||
           normalize(`${item.title} ${item.meta} ${item.detail}`).includes(normalize(movementFilters.query))
-        const matchesDateFrom = !movementFilters.dateFrom || item.date >= movementFilters.dateFrom
-        const matchesDateTo = !movementFilters.dateTo || item.date <= movementFilters.dateTo
-        return matchesPocket && matchesKind && matchesQuery && matchesDateFrom && matchesDateTo
+        return matchesPocket && matchesKind && matchesQuery
       })
       .map((item) => {
         if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
@@ -891,6 +802,21 @@ function App() {
       pocketId: initialState.pockets[0].id,
       category: 'Otros',
     })
+  }
+
+  function openFixedPaymentConfirmation(fixedId: string) {
+    const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
+    if (!fixed) return
+
+    setFixedPaymentDraft({
+      fixedId,
+      pocketId: fixed.pocketId || state.pockets[0]?.id || initialState.pockets[0].id,
+      paymentDate: today,
+    })
+  }
+
+  function closeFixedPaymentConfirmation() {
+    setFixedPaymentDraft(null)
   }
 
   function startEditPocket(pocketId: string) {
@@ -1198,6 +1124,44 @@ function App() {
     setOpenComposer(null)
   }
 
+  function handleDeletePocket(pocketId: string) {
+    const targetPocket = state.pockets.find((item) => item.id === pocketId)
+    if (!targetPocket) return
+
+    const linkedIncomeCount = state.incomes.filter((item) => item.pocketId === pocketId).length
+    const linkedExpenseCount = state.expenses.filter((item) => item.pocketId === pocketId).length
+    const linkedTransferCount = state.transfers.filter(
+      (item) => item.fromPocketId === pocketId || item.toPocketId === pocketId,
+    ).length
+    const linkedFixedCount = state.fixedExpenses.filter((item) => item.pocketId === pocketId).length
+    const linkedDebtCount = state.debts.filter((item) => item.pocketId === pocketId).length
+
+    const totalLinks =
+      linkedIncomeCount + linkedExpenseCount + linkedTransferCount + linkedFixedCount + linkedDebtCount
+
+    if (totalLinks > 0) {
+      window.alert(
+        `No puedes eliminar el bolsillo ${targetPocket.name} porque tiene relacion con ${totalLinks} registro(s) entre movimientos, obligaciones o deudas.`,
+      )
+      return
+    }
+
+    if (!window.confirm(`Se eliminara el bolsillo ${targetPocket.name}. Esta accion no se puede deshacer.`)) return
+
+    setState((current) => ({
+      ...current,
+      pockets: current.pockets.filter((item) => item.id !== pocketId),
+    }))
+
+    if (selectedPocketId === pocketId) {
+      const nextPocket = state.pockets.find((item) => item.id !== pocketId)
+      if (nextPocket) setSelectedPocketId(nextPocket.id)
+    }
+
+    resetPocketForm()
+    setOpenComposer(null)
+  }
+
   function handleCategoryCorrection(expenseId: string, category: Category) {
     setState((current) => {
       const expense = current.expenses.find((item) => item.id === expenseId)
@@ -1222,17 +1186,20 @@ function App() {
     })
   }
 
-  function handlePayFixedExpense(fixedId: string) {
+  function handlePayFixedExpense(fixedId: string, paymentPocketId?: string, paymentDate?: string) {
     setState((current) => {
       const fixed = current.fixedExpenses.find((item) => item.id === fixedId)
-      if (!fixed || fixed.lastPaidMonth === currentMonthKey) return current
+      const effectiveDate = paymentDate || today
+      const effectiveMonthKey = effectiveDate.slice(0, 7)
+
+      if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return current
 
       const expense: Expense = {
         id: crypto.randomUUID(),
         description: fixed.title,
         amount: fixed.amount,
-        pocketId: fixed.pocketId,
-        date: today,
+        pocketId: paymentPocketId || fixed.pocketId,
+        date: effectiveDate,
         source: 'fixed',
         category: fixed.category,
         confidence: 1,
@@ -1242,10 +1209,18 @@ function App() {
         ...current,
         expenses: [expense, ...current.expenses],
         fixedExpenses: current.fixedExpenses.map((item) =>
-          item.id === fixedId ? { ...item, lastPaidMonth: currentMonthKey } : item,
+          item.id === fixedId ? { ...item, lastPaidMonth: effectiveMonthKey } : item,
         ),
       }
     })
+  }
+
+  function handleConfirmFixedPayment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!fixedPaymentDraft?.fixedId || !fixedPaymentDraft.pocketId || !fixedPaymentDraft.paymentDate) return
+
+    handlePayFixedExpense(fixedPaymentDraft.fixedId, fixedPaymentDraft.pocketId, fixedPaymentDraft.paymentDate)
+    closeFixedPaymentConfirmation()
   }
 
   function handleToggleFixedExpense(fixedId: string) {
@@ -1421,11 +1396,12 @@ function App() {
   }
 
   async function loadManagedUsers() {
-    if (!supabase || !isAdminUser) return
+    const client = getSupabaseClient()
+    if (!client || !isAdminUser) return
     setUsersLoading(true)
     setUsersFeedback(null)
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('usuarios')
       .select('username, cedula, nombre, password, typeuser')
       .order('created_at', { ascending: true })
@@ -1442,6 +1418,7 @@ function App() {
 
   function resetUserAdminForm() {
     setShowUserAdminForm(false)
+    setShowUserAdminPassword(false)
     setUserAdminForm({
       username: '',
       cedula: '',
@@ -1456,6 +1433,7 @@ function App() {
     const target = managedUsers.find((item) => item.username === username)
     if (!target) return
     setShowUserAdminForm(true)
+    setShowUserAdminPassword(false)
     setUserAdminForm({
       username: target.username,
       cedula: target.cedula,
@@ -1468,8 +1446,9 @@ function App() {
 
   async function handleSubmitManagedUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const client = getSupabaseClient()
     if (
-      !supabase ||
+      !client ||
       !isAdminUser ||
       !userAdminForm.username.trim() ||
       !userAdminForm.cedula.trim() ||
@@ -1482,7 +1461,7 @@ function App() {
     setUsersFeedback(null)
 
     if (userAdminForm.editingUsername) {
-      const { error } = await supabase
+      const { error } = await client
         .from('usuarios')
         .update({
           username: userAdminForm.username.trim(),
@@ -1501,18 +1480,76 @@ function App() {
 
       setUsersFeedback('Usuario actualizado correctamente.')
     } else {
-      const { error } = await supabase.from('usuarios').insert({
-        username: userAdminForm.username.trim(),
-        cedula: userAdminForm.cedula.trim(),
-        nombre: userAdminForm.nombre.trim() || `Usuario ${userAdminForm.cedula.trim()}`,
-        password: userAdminForm.password.trim(),
-        typeuser: userAdminForm.typeuser,
-      })
+      const { data, error } = await client
+        .from('usuarios')
+        .insert({
+          username: userAdminForm.username.trim(),
+          cedula: userAdminForm.cedula.trim(),
+          nombre: userAdminForm.nombre.trim() || `Usuario ${userAdminForm.cedula.trim()}`,
+          password: userAdminForm.password.trim(),
+          typeuser: userAdminForm.typeuser,
+        })
+        .select('id')
+        .single()
 
       if (error) {
         setUsersFeedback(error.message)
         setUsersLoading(false)
         return
+      }
+
+      if (data?.id) {
+        const { error: configError } = await client.from('configuracion').upsert(
+          {
+            usuario_id: data.id,
+          },
+          { onConflict: 'usuario_id' },
+        )
+
+        if (configError) {
+          setUsersFeedback(configError.message)
+          setUsersLoading(false)
+          return
+        }
+
+        const defaultCategoryRows = defaultCategories.map((category, index) => ({
+          usuario_id: data.id,
+          app_id: `category:${index}:${String(category).toLowerCase()}`,
+          nombre: category,
+          posicion: index,
+          es_sistema: true,
+        }))
+
+        const { error: categoriesError } = await client.from('categorias').upsert(defaultCategoryRows, {
+          onConflict: 'usuario_id,app_id',
+        })
+
+        if (categoriesError) {
+          setUsersFeedback(categoriesError.message)
+          setUsersLoading(false)
+          return
+        }
+
+        const defaultPocketRows = initialState.pockets.map((pocket, index) => ({
+          usuario_id: data.id,
+          app_id: pocket.id,
+          nombre: pocket.name,
+          color: pocket.color,
+          icono: pocket.icon,
+          tipo: pocket.type,
+          posicion: index,
+          archivado: false,
+        }))
+
+        const { error: pocketsError } = await client.from('bolsillos').upsert(defaultPocketRows, {
+          onConflict: 'usuario_id,app_id',
+        })
+
+        if (pocketsError) {
+          setUsersFeedback(pocketsError.message)
+          setUsersLoading(false)
+          return
+        }
       }
 
       setUsersFeedback('Usuario creado correctamente.')
@@ -1916,16 +1953,25 @@ function App() {
         </div>
         <button type="submit">{pocketForm.id ? 'Guardar bolsillo' : 'Crear bolsillo'}</button>
         {pocketForm.id && (
-          <button
-            type="button"
-            className="secondary-button cancel-action"
-            onClick={() => {
-              resetPocketForm()
-              setOpenComposer(null)
-            }}
-          >
-            Cancelar edicion
-          </button>
+          <div className="composer-action-row">
+            <button
+              type="button"
+              className="secondary-button delete-action"
+              onClick={() => handleDeletePocket(pocketForm.id)}
+            >
+              Eliminar bolsillo
+            </button>
+            <button
+              type="button"
+              className="secondary-button cancel-action"
+              onClick={() => {
+                resetPocketForm()
+                setOpenComposer(null)
+              }}
+            >
+              Cancelar edicion
+            </button>
+          </div>
         )}
       </form>
     )
@@ -2323,6 +2369,36 @@ function App() {
   }
 
   function renderPocketsView() {
+    if (!selectedPocket) {
+      return (
+        <section className="dashboard-grid">
+          <div className="primary-column">
+            <section className="panel banking-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Mapa de bolsillos</span>
+                  <h2>Tus cuentas internas</h2>
+                </div>
+                <button
+                  className="action-trigger"
+                  type="button"
+                  onClick={() => {
+                    resetPocketForm()
+                    openComposerForView('bolsillos', 'bolsillos')
+                  }}
+                >
+                  Registrar bolsillo
+                </button>
+              </div>
+              <p className="empty-copy">
+                Todavia no hay bolsillos disponibles para este perfil. Crea uno o espera la inicializacion del perfil.
+              </p>
+            </section>
+          </div>
+        </section>
+      )
+    }
+
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
@@ -2415,16 +2491,25 @@ function App() {
                 </div>
                 <button type="submit">{pocketForm.id ? 'Guardar cambios' : 'Crear bolsillo'}</button>
                 {pocketForm.id && (
-                  <button
-                    type="button"
-                    className="secondary-button cancel-action"
-                    onClick={() => {
-                      resetPocketForm()
-                      setOpenComposer(null)
-                    }}
-                  >
-                    Cancelar edicion
-                  </button>
+                  <div className="composer-action-row">
+                    <button
+                      type="button"
+                      className="secondary-button delete-action"
+                      onClick={() => handleDeletePocket(pocketForm.id)}
+                    >
+                      Eliminar bolsillo
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button cancel-action"
+                      onClick={() => {
+                        resetPocketForm()
+                        setOpenComposer(null)
+                      }}
+                    >
+                      Cancelar edicion
+                    </button>
+                  </div>
                 )}
               </form>
             </section>
@@ -2536,36 +2621,18 @@ function App() {
     return (
       <>
         {openComposer === 'movimientos' && (
-          <div className="fullscreen-composer-shell">
-            <div
-              className="fullscreen-composer-backdrop"
-              onClick={() => {
-                resetExpenseForm()
-                resetIncomeForm()
-                resetTransferForm()
-                setOpenComposer(null)
-              }}
-            />
-            <section className="fullscreen-composer-panel banking-panel action-panel">
-              <div className="composer-toolbar fullscreen">
-                <div>
-                  <span className="micro-label">Registrar</span>
-                  <h2>{moduleLabels[activeModule]}</h2>
-                  <p>{getModuleSummary(activeModule)}</p>
-                </div>
-                <button
-                  type="button"
-                  className="secondary-button cancel-action"
-                  onClick={() => {
-                    resetExpenseForm()
-                    resetIncomeForm()
-                    resetTransferForm()
-                    setOpenComposer(null)
-                  }}
-                >
-                  Cerrar
-                </button>
-              </div>
+          <FullscreenComposer
+            isOpen={openComposer === 'movimientos'}
+            label="Registrar"
+            title={moduleLabels[activeModule]}
+            description={getModuleSummary(activeModule)}
+            onClose={() => {
+              resetExpenseForm()
+              resetIncomeForm()
+              resetTransferForm()
+              setOpenComposer(null)
+            }}
+            toolbarContent={
               <div className="module-segmented">
                 {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
                   <button
@@ -2578,23 +2645,34 @@ function App() {
                   </button>
                 ))}
               </div>
-              <div className="fullscreen-composer-body">{renderActiveForm()}</div>
-            </section>
-          </div>
+            }
+          >
+            {renderActiveForm()}
+          </FullscreenComposer>
         )}
 
-        <section className="dashboard-grid">
-          <div className="primary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Filtro operativo</span>
-                <h2>Consulta por bolsillo y tipo</h2>
+        <section className="panel banking-panel movement-command-center">
+          <div className="movement-command-header">
+            <div>
+              <span className="micro-label">Filtro operativo</span>
+              <h2>Centro de movimientos</h2>
+              <p className="movement-detail">
+                Consulta, registra y exporta la actividad del mes sin perder contexto del bolsillo y el tipo de movimiento.
+              </p>
+            </div>
+          </div>
+
+          <div className="movement-command-nav">
+            <div className="movement-command-actions">
+              <div className="movement-command-badge">
+                <span>Mes activo</span>
+                <strong>{movementMonthKey}</strong>
               </div>
-              <div className="panel-header-actions">
-                <p>
-                  {movementSummary.count} resultado(s) · {movementMonthKey}
-                </p>
+              <div className="movement-command-badge">
+                <span>Resultados</span>
+                <strong>{movementSummary.count}</strong>
+              </div>
+              <div className="movement-command-buttons">
                 <button
                   className="action-trigger"
                   type="button"
@@ -2612,8 +2690,11 @@ function App() {
                 </button>
               </div>
             </div>
-            <div className="movement-filter-board">
-              <div className="filter-field">
+          </div>
+
+          <div className="movement-filter-layout">
+            <div className="movement-filter-row movement-filter-row-primary">
+              <div className="filter-field month-field compact inline">
                 <span className="filter-field-label">Mes</span>
                 <input
                   type="month"
@@ -2621,7 +2702,20 @@ function App() {
                   onChange={(event) => setMovementMonthKey(event.target.value)}
                 />
               </div>
-              <div className="filter-field">
+              <div className="filter-field search-field expanded inline">
+                <span className="filter-field-label">Buscar</span>
+                <input
+                  value={movementFilters.query}
+                  onChange={(event) =>
+                    setMovementFilters((current) => ({ ...current, query: event.target.value }))
+                  }
+                  placeholder="Descripcion, bolsillo o categoria"
+                />
+              </div>
+            </div>
+
+            <div className="movement-filter-row movement-filter-row-secondary">
+              <div className="filter-field filter-select-card compact inline">
                 <span className="filter-field-label">Bolsillo</span>
                 <div className="filter-select-wrap">
                   <select
@@ -2639,8 +2733,8 @@ function App() {
                   </select>
                 </div>
               </div>
-              <div className="filter-field">
-                <span className="filter-field-label">Tipo de movimiento</span>
+              <div className="filter-field filter-select-card compact inline">
+                <span className="filter-field-label">Tipo</span>
                 <div className="filter-select-wrap">
                   <select
                     value={movementFilters.kind}
@@ -2658,55 +2752,7 @@ function App() {
                   </select>
                 </div>
               </div>
-              <div className="movement-filter-card">
-                <span>Filtro activo</span>
-                <strong>
-                  {movementFilters.pocketId === 'todos'
-                    ? 'Vista global'
-                    : getPocketName(state.pockets, movementFilters.pocketId)}
-                </strong>
-                <p>
-                  {movementFilters.kind === 'todos'
-                    ? 'Todos los tipos'
-                    : `Solo ${movementFilters.kind}`}
-                </p>
-                <p>Mes consultado: {movementMonthKey}</p>
-              </div>
-            </div>
-            <div className="movement-filter-board compact">
-              <div className="filter-field">
-                <span className="filter-field-label">Buscar</span>
-                <input
-                  value={movementFilters.query}
-                  onChange={(event) =>
-                    setMovementFilters((current) => ({ ...current, query: event.target.value }))
-                  }
-                  placeholder="Descripcion, bolsillo o categoria"
-                />
-              </div>
-              <div className="filter-field two-inline">
-                <label>
-                  Desde
-                  <input
-                    type="date"
-                    value={movementFilters.dateFrom}
-                    onChange={(event) =>
-                      setMovementFilters((current) => ({ ...current, dateFrom: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Hasta
-                  <input
-                    type="date"
-                    value={movementFilters.dateTo}
-                    onChange={(event) =>
-                      setMovementFilters((current) => ({ ...current, dateTo: event.target.value }))
-                    }
-                  />
-                </label>
-              </div>
-              <div className="filter-field">
+              <div className="filter-field grouping-field compact inline">
                 <span className="filter-field-label">Agrupacion</span>
                 <div className="module-segmented compact">
                   {(['dia', 'mes'] as const).map((groupBy) => (
@@ -2722,7 +2768,24 @@ function App() {
                 </div>
               </div>
             </div>
-            <div className="movement-summary-grid">
+          </div>
+
+          <div className="movement-filter-strip">
+            <span className="movement-filter-strip-label">Filtro activo</span>
+            <strong>
+              {movementFilters.pocketId === 'todos'
+                ? 'Vista global'
+                : getPocketName(state.pockets, movementFilters.pocketId)}
+            </strong>
+            <span>
+              {movementFilters.kind === 'todos'
+                ? 'Todos los tipos'
+                : `Solo ${movementFilters.kind}`}
+            </span>
+            <span>Mes consultado: {movementMonthKey}</span>
+          </div>
+
+          <div className="movement-summary-grid refined">
               <div className="summary-box movement-stat income">
                 <span>Entradas filtradas</span>
                 <strong>{money.format(movementSummary.inflow)}</strong>
@@ -2735,10 +2798,11 @@ function App() {
                 <span>Transferencias</span>
                 <strong>{movementSummary.transfers}</strong>
               </div>
-            </div>
-          </section>
+          </div>
+        </section>
 
-          <section className="panel banking-panel">
+        <section className="movement-content-stack">
+          <section className="panel banking-panel movement-ledger-panel">
             <div className="panel-header">
               <div>
                 <span className="micro-label">Libro mayor</span>
@@ -2801,105 +2865,192 @@ function App() {
               )}
             </div>
           </section>
-          </div>
 
-          <aside className="secondary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Lectura rapida</span>
-                <h2>Saldo por bolsillo</h2>
+          <section className="movement-insight-grid">
+            <section className="panel banking-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Lectura rapida</span>
+                  <h2>Saldo por bolsillo</h2>
+                </div>
               </div>
-            </div>
-            <div className="pocket-list-compact">
-              {state.pockets.map((pocket) => (
-                <article key={pocket.id} className="compact-pocket-row">
-                  <div className="compact-pocket-name">
-                    <span className="icon-badge inline" style={{ background: pocket.color }}>
-                      {pocket.icon}
-                    </span>
-                    <strong>{pocket.name}</strong>
-                  </div>
-                  <span>{money.format(pocketBalances[pocket.id] ?? 0)}</span>
-                </article>
-              ))}
-            </div>
-          </section>
+              <div className="pocket-list-compact movement-pocket-grid">
+                {state.pockets.map((pocket) => (
+                  <article key={pocket.id} className="compact-pocket-row">
+                    <div className="compact-pocket-name">
+                      <span className="icon-badge inline" style={{ background: pocket.color }}>
+                        {pocket.icon}
+                      </span>
+                      <strong>{pocket.name}</strong>
+                    </div>
+                    <span>{money.format(pocketBalances[pocket.id] ?? 0)}</span>
+                  </article>
+                ))}
+              </div>
+            </section>
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Clasificacion</span>
-                <h2>Revisar IA</h2>
+            <section className="panel banking-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Clasificacion</span>
+                  <h2>Revisar IA</h2>
+                </div>
               </div>
-            </div>
-            <div className="ledger">
-              {movementMonthExpenses.slice(0, 4).map((expense) => (
-                <article key={expense.id} className="ledger-row editable">
-                  <div className="ledger-copy">
-                    <strong>{expense.description}</strong>
-                    <p>
-                      {expense.date} · {getPocketName(state.pockets, expense.pocketId)}
-                    </p>
-                  </div>
-                  <div className="ledger-actions">
-                    <span>{money.format(expense.amount)}</span>
-                    <select
-                      value={expense.category}
-                      onChange={(event) =>
-                        handleCategoryCorrection(expense.id, event.target.value as Category)
-                      }
-                    >
-                      {state.categories.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </article>
-              ))}
-            </div>
+              <div className="ledger">
+                {movementMonthExpenses.slice(0, 4).map((expense) => (
+                  <article key={expense.id} className="ledger-row editable">
+                    <div className="ledger-copy">
+                      <strong>{expense.description}</strong>
+                      <p>
+                        {expense.date} · {getPocketName(state.pockets, expense.pocketId)}
+                      </p>
+                    </div>
+                    <div className="ledger-actions">
+                      <span>{money.format(expense.amount)}</span>
+                      <select
+                        value={expense.category}
+                        onChange={(event) =>
+                          handleCategoryCorrection(expense.id, event.target.value as Category)
+                        }
+                      >
+                        {state.categories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </article>
+                ))}
+                {movementMonthExpenses.length === 0 && (
+                  <p className="empty-copy">Sin gastos para auditar este mes.</p>
+                )}
+              </div>
+            </section>
           </section>
-          </aside>
         </section>
       </>
     )
   }
 
   function renderProgrammingView() {
+    const fixedPaymentTarget = fixedPaymentDraft
+      ? state.fixedExpenses.find((item) => item.id === fixedPaymentDraft.fixedId) ?? null
+      : null
+    const fixedPaymentIsDueOrPast = fixedPaymentTarget ? fixedPaymentTarget.dueDay <= currentDay : false
+
     return (
       <>
         {openComposer === 'programacion' && (
-          <div className="fullscreen-composer-shell">
-            <div
-              className="fullscreen-composer-backdrop"
-              onClick={() => {
-                resetFixedForm()
-                setOpenComposer(null)
-              }}
-            />
-            <section className="fullscreen-composer-panel banking-panel action-panel">
-              <div className="composer-toolbar fullscreen">
-                <div>
-                  <span className="micro-label">Nueva obligacion</span>
-                  <h2>{fixedForm.id ? 'Editar obligacion' : 'Registrar obligacion'}</h2>
-                  <p>Define monto, bolsillo, categoria y dias de pago y confirmacion.</p>
+          <FullscreenComposer
+            isOpen={openComposer === 'programacion'}
+            label="Nueva obligacion"
+            title={fixedForm.id ? 'Editar obligacion' : 'Registrar obligacion'}
+            description="Define monto, bolsillo, categoria y dias de pago y confirmacion."
+            onClose={() => {
+              resetFixedForm()
+              setOpenComposer(null)
+            }}
+          >
+            {renderActiveForm()}
+          </FullscreenComposer>
+        )}
+
+        {fixedPaymentDraft && fixedPaymentTarget && (
+          <FullscreenComposer
+            isOpen={Boolean(fixedPaymentDraft && fixedPaymentTarget)}
+            label="Confirmacion"
+            title={fixedPaymentIsDueOrPast ? 'Confirmar pago de obligacion' : 'Adelantar pago de obligacion'}
+            description="Valida el valor, la fecha efectiva y el bolsillo desde el que saldra el pago."
+            onClose={closeFixedPaymentConfirmation}
+          >
+            <form className="bank-form obligation-payment-form" onSubmit={handleConfirmFixedPayment}>
+              <section className="payment-confirmation-card">
+                <div className="payment-confirmation-head">
+                  <div>
+                    <span className="micro-label">Obligacion</span>
+                    <h3>{fixedPaymentTarget.title}</h3>
+                  </div>
+                  <strong>{money.format(fixedPaymentTarget.amount)}</strong>
                 </div>
+                <div className="payment-confirmation-grid">
+                  <div className="summary-box">
+                    <span>Categoria</span>
+                    <strong>{fixedPaymentTarget.category}</strong>
+                  </div>
+                  <div className="summary-box">
+                    <span>Dia programado</span>
+                    <strong>{fixedPaymentTarget.dueDay}</strong>
+                  </div>
+                  <div className="summary-box">
+                    <span>Confirmacion</span>
+                    <strong>Dia {fixedPaymentTarget.confirmationDay}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <div className="form-grid two">
+                <label>
+                  Fecha del pago
+                  <input
+                    type="date"
+                    value={fixedPaymentDraft.paymentDate}
+                    onChange={(event) =>
+                      setFixedPaymentDraft((current) =>
+                        current ? { ...current, paymentDate: event.target.value } : current,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Bolsillo desde el que se paga
+                  <select
+                    value={fixedPaymentDraft.pocketId}
+                    onChange={(event) =>
+                      setFixedPaymentDraft((current) =>
+                        current ? { ...current, pocketId: event.target.value } : current,
+                      )
+                    }
+                  >
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name} · {money.format(pocketBalances[pocket.id] ?? 0)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <section className="payment-confirmation-card compact">
+                <div className="status-grid obligation-payment-metrics">
+                  <div>
+                    <span>Accion</span>
+                    <strong>{fixedPaymentIsDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}</strong>
+                  </div>
+                  <div>
+                    <span>Se registrara como</span>
+                    <strong>Gasto fijo</strong>
+                  </div>
+                </div>
+              </section>
+
+              <div className="composer-action-row">
+                <button
+                  type="submit"
+                  className={fixedPaymentIsDueOrPast ? 'warning-button' : undefined}
+                >
+                  {fixedPaymentIsDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
+                </button>
                 <button
                   type="button"
                   className="secondary-button cancel-action"
-                  onClick={() => {
-                    resetFixedForm()
-                    setOpenComposer(null)
-                  }}
+                  onClick={closeFixedPaymentConfirmation}
                 >
-                  Cerrar
+                  Cancelar
                 </button>
               </div>
-              <div className="fullscreen-composer-body">{renderActiveForm()}</div>
-            </section>
-          </div>
+            </form>
+          </FullscreenComposer>
         )}
 
         <section className="dashboard-grid">
@@ -2924,30 +3075,143 @@ function App() {
                 </button>
               </div>
             </div>
-            <div className="status-grid obligation-metrics">
-              <div>
-                <span>Activas</span>
-                <strong>{fixedStatus.activeItems.length}</strong>
+            <section className="obligation-overview-board">
+              <article className="obligation-hero-card">
+                <div className="obligation-hero-head">
+                  <div>
+                    <span className="micro-label">Carga mensual</span>
+                    <h3>{money.format(obligationSummary.totalActiveAmount)}</h3>
+                  </div>
+                  <small>{fixedStatus.pending.length} por confirmar este mes</small>
+                </div>
+                <div className="obligation-hero-metrics">
+                  <div>
+                    <span>Pendiente</span>
+                    <strong>{money.format(obligationSummary.totalPendingAmount)}</strong>
+                  </div>
+                  <div>
+                    <span>Activas</span>
+                    <strong>{fixedStatus.activeItems.length}</strong>
+                  </div>
+                  <div>
+                    <span>Pagadas</span>
+                    <strong>{fixedStatus.paid.length}</strong>
+                  </div>
+                  <div>
+                    <span>Pausadas</span>
+                    <strong>{fixedStatus.paused.length}</strong>
+                  </div>
+                </div>
+              </article>
+
+              <div className="obligation-insight-grid">
+                <article className="summary-box accent">
+                  <span>Dia con mayor carga</span>
+                  <strong>
+                    {obligationSummary.heaviestDueDay
+                      ? `Dia ${obligationSummary.heaviestDueDay.day}`
+                      : 'Sin carga'}
+                  </strong>
+                  <p className="movement-detail">
+                    {obligationSummary.heaviestDueDay
+                      ? money.format(obligationSummary.heaviestDueDay.total)
+                      : 'Aun no hay obligaciones activas'}
+                  </p>
+                </article>
+                <article className="summary-box">
+                  <span>Obligacion mas pesada</span>
+                  <strong>{obligationSummary.highestObligation?.title ?? 'Sin datos'}</strong>
+                  <p className="movement-detail">
+                    {obligationSummary.highestObligation
+                      ? money.format(obligationSummary.highestObligation.amount)
+                      : 'Sin obligaciones activas'}
+                  </p>
+                </article>
+                <article className="summary-box">
+                  <span>En revision hoy</span>
+                  <strong>{fixedStatus.review.length}</strong>
+                  <p className="movement-detail">
+                    {fixedStatus.overdue.length} vencida(s) y {fixedStatus.pending.length - fixedStatus.overdue.length}{' '}
+                    pendiente(s)
+                  </p>
+                </article>
               </div>
-              <div>
-                <span>En revision</span>
-                <strong>{fixedStatus.review.length}</strong>
+            </section>
+
+            <section className="obligation-agenda-grid">
+              <article className="panel banking-panel obligation-agenda-panel">
+                <div className="panel-header">
+                  <div>
+                    <span className="micro-label">Agenda</span>
+                    <h3>Proximos pagos</h3>
+                  </div>
+                </div>
+                <div className="obligation-agenda-list">
+                  {obligationSummary.nextDeadlines.map((item) => (
+                    <div key={item.id} className="compact-pocket-row obligation-agenda-row">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p className="movement-detail">
+                          Dia {item.dueDay} · {getPocketName(state.pockets, item.pocketId)}
+                        </p>
+                      </div>
+                      <span>{money.format(item.amount)}</span>
+                    </div>
+                  ))}
+                  {obligationSummary.nextDeadlines.length === 0 && (
+                    <p className="empty-copy">No hay pagos pendientes por agendar.</p>
+                  )}
+                </div>
+              </article>
+
+              <article className="panel banking-panel obligation-agenda-panel">
+                <div className="panel-header">
+                  <div>
+                    <span className="micro-label">Control</span>
+                    <h3>Proximas confirmaciones</h3>
+                  </div>
+                </div>
+                <div className="obligation-agenda-list">
+                  {obligationSummary.nextConfirmations.map((item) => (
+                    <div key={item.id} className="compact-pocket-row obligation-agenda-row">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p className="movement-detail">
+                          Confirmar dia {item.confirmationDay} · {item.category}
+                        </p>
+                      </div>
+                      <span>{money.format(item.amount)}</span>
+                    </div>
+                  ))}
+                  {obligationSummary.nextConfirmations.length === 0 && (
+                    <p className="empty-copy">No hay confirmaciones pendientes.</p>
+                  )}
+                </div>
+              </article>
+            </section>
+
+            <section className="obligation-list-board">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Listado operativo</span>
+                  <h3>Obligaciones registradas</h3>
+                </div>
+                <p>{state.fixedExpenses.length} registro(s)</p>
               </div>
-              <div>
-                <span>Pausadas</span>
-                <strong>{fixedStatus.paused.length}</strong>
-              </div>
-            </div>
-            <div className="fixed-stack">
+              <div className="fixed-stack">
               {state.fixedExpenses
                 .sort((a, b) => a.dueDay - b.dueDay)
                 .map((item) => {
                   const isPaid = item.lastPaidMonth === currentMonthKey
+                  const isDueOrPast = !isPaid && item.dueDay <= currentDay
                   const isLate = !isPaid && item.dueDay < currentDay
 
                   return (
-                    <article key={item.id} className="fixed-card">
-                      <div>
+                    <article
+                      key={item.id}
+                      className={isLate ? 'fixed-card obligation-row late-row' : 'fixed-card obligation-row'}
+                    >
+                      <div className="obligation-main">
                         <div className="card-title-row">
                           <strong>{item.title}</strong>
                           <button
@@ -2959,9 +3223,12 @@ function App() {
                             ✎
                           </button>
                         </div>
-                        <p>
-                          Pago dia {item.dueDay} · confirmar dia {item.confirmationDay} · {getPocketName(state.pockets, item.pocketId)} · {item.category}
-                        </p>
+                        <div className="obligation-chip-row">
+                          <span className="obligation-chip">Pago dia {item.dueDay}</span>
+                          <span className="obligation-chip">Confirmar dia {item.confirmationDay}</span>
+                          <span className="obligation-chip">{getPocketName(state.pockets, item.pocketId)}</span>
+                          <span className="obligation-chip">{item.category}</span>
+                        </div>
                       </div>
                       <div className="fixed-card-side">
                         <span>{money.format(item.amount)}</span>
@@ -2969,8 +3236,12 @@ function App() {
                           {!item.active ? 'Pausada' : isPaid ? 'Pagado' : isLate ? 'Vencido' : 'Pendiente'}
                         </small>
                         {item.active && !isPaid && (
-                          <button type="button" onClick={() => handlePayFixedExpense(item.id)}>
-                            Marcar pago
+                          <button
+                            type="button"
+                            className={isDueOrPast ? 'warning-button' : undefined}
+                            onClick={() => openFixedPaymentConfirmation(item.id)}
+                          >
+                            {isDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
                           </button>
                         )}
                         <button type="button" className="secondary-button slim" onClick={() => handleToggleFixedExpense(item.id)}>
@@ -2980,9 +3251,42 @@ function App() {
                     </article>
                   )
                 })}
-            </div>
+              </div>
+            </section>
             </section>
           </div>
+
+          <aside className="secondary-column">
+            <section className="panel banking-panel emphasis">
+              <span className="micro-label">Resumen operativo</span>
+              <h2>Prioridad del mes</h2>
+              <p>
+                {fixedStatus.overdue.length > 0
+                  ? `Tienes ${fixedStatus.overdue.length} obligacion(es) vencida(s). Conviene confirmar pagos antes de mover saldo a otros bolsillos.`
+                  : fixedStatus.pending.length > 0
+                    ? `Aun quedan ${fixedStatus.pending.length} obligacion(es) por ejecutar o confirmar en ${currentMonthKey}.`
+                    : 'Todas las obligaciones activas de este mes ya fueron confirmadas.'}
+              </p>
+              <div className="status-grid obligation-metrics">
+                <div>
+                  <span>Vencidas</span>
+                  <strong>{fixedStatus.overdue.length}</strong>
+                </div>
+                <div>
+                  <span>Revision</span>
+                  <strong>{fixedStatus.review.length}</strong>
+                </div>
+                <div>
+                  <span>Pagadas</span>
+                  <strong>{fixedStatus.paid.length}</strong>
+                </div>
+                <div>
+                  <span>Pausadas</span>
+                  <strong>{fixedStatus.paused.length}</strong>
+                </div>
+              </div>
+            </section>
+          </aside>
         </section>
       </>
     )
@@ -2993,24 +3297,16 @@ function App() {
       <section className="dashboard-grid">
         <div className="primary-column">
           {openComposer === 'deudas' && (
-            <section className="panel banking-panel action-panel">
-              <div className="composer-toolbar">
-                <div>
-                  <span className="micro-label">Nueva deuda</span>
-                  <h2>Registrar deuda</h2>
-                  <p>Define saldo total, cuota estimada, bolsillo pagador y categoria asociada.</p>
-                </div>
-                <button
-                  type="button"
-                  className="secondary-button cancel-action"
-                  onClick={() => {
-                    resetDebtForm()
-                    setOpenComposer(null)
-                  }}
-                >
-                  Cerrar
-                </button>
-              </div>
+            <FullscreenComposer
+              isOpen={openComposer === 'deudas'}
+              label="Nueva deuda"
+              title={debtForm.id ? 'Editar deuda' : 'Registrar deuda'}
+              description="Define saldo total, cuota estimada, bolsillo pagador y categoria asociada."
+              onClose={() => {
+                resetDebtForm()
+                setOpenComposer(null)
+              }}
+            >
               <form className="bank-form" onSubmit={handleAddDebt}>
                 <label>
                   Nombre de la deuda
@@ -3100,7 +3396,7 @@ function App() {
                   </button>
                 )}
               </form>
-            </section>
+            </FullscreenComposer>
           )}
 
           <section className="panel banking-panel">
@@ -3328,6 +3624,10 @@ function App() {
                 <strong>{money.format(totals.pendingDebt)}</strong>
               </div>
               <div>
+                <span>Cuotas del mes</span>
+                <strong>{money.format(monthlyDebtCommitment)}</strong>
+              </div>
+              <div>
                 <span>Activas</span>
                 <strong>{activeDebts.length}</strong>
               </div>
@@ -3470,13 +3770,25 @@ function App() {
                   </label>
                   <label>
                     Contrasena
-                    <input
-                      value={userAdminForm.password}
-                      onChange={(event) =>
-                        setUserAdminForm((current) => ({ ...current, password: event.target.value }))
-                      }
-                      placeholder="Contrasena inicial"
-                    />
+                    <div className="password-field">
+                      <input
+                        type={showUserAdminPassword ? 'text' : 'password'}
+                        value={userAdminForm.password}
+                        onChange={(event) =>
+                          setUserAdminForm((current) => ({ ...current, password: event.target.value }))
+                        }
+                        placeholder="Contrasena inicial"
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        onClick={() => setShowUserAdminPassword((current) => !current)}
+                        aria-label={showUserAdminPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                        title={showUserAdminPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                      >
+                        {showUserAdminPassword ? '🙈' : '👁'}
+                      </button>
+                    </div>
                   </label>
                 </div>
                 <label className="toggle-row">
@@ -3704,14 +4016,25 @@ function App() {
             )}
             <label>
               Contrasena
-              <input
-                type="password"
-                value={authForm.password}
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, password: event.target.value }))
-                }
-                placeholder={authMode === 'login' ? 'Ingresa tu contrasena' : 'Define la contrasena inicial'}
-              />
+              <div className="password-field password-field-auth">
+                <input
+                  type={showAuthPassword ? 'text' : 'password'}
+                  value={authForm.password}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({ ...current, password: event.target.value }))
+                  }
+                  placeholder={authMode === 'login' ? 'Ingresa tu contrasena' : 'Define la contrasena inicial'}
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowAuthPassword((current) => !current)}
+                  aria-label={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                  title={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                >
+                  {showAuthPassword ? '🙈' : '👁'}
+                </button>
+              </div>
             </label>
             <button type="submit" disabled={isSubmittingAuth}>
               {isSubmittingAuth
@@ -3726,6 +4049,7 @@ function App() {
               onClick={() => {
                 setAuthMode((current) => (current === 'login' ? 'register' : 'login'))
                 setAuthFeedback(null)
+                setShowAuthPassword(false)
               }}
             >
               {authMode === 'login' ? 'Crear cuenta' : 'Ya tengo cuenta'}
@@ -3759,16 +4083,18 @@ function App() {
   return (
     <main className="banking-app">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">F</div>
-          <div>
-            <strong>MoneyApp</strong>
-            <p>Control financiero</p>
+        <div className="sidebar-brand-row">
+          <div className="brand">
+            <div className="brand-mark">F</div>
+            <div>
+              <strong>MoneyApp</strong>
+              <p>Control financiero</p>
+            </div>
           </div>
         </div>
 
         {auth.user && (
-          <section className="sidebar-card">
+          <section className="sidebar-card sidebar-user-card">
             <span className="micro-label">Usuario</span>
             <strong>{auth.user.nombre || `@${auth.user.username}`}</strong>
             <p>@{auth.user.username}</p>
@@ -3780,7 +4106,7 @@ function App() {
           </section>
         )}
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav desktop-nav">
           {(Object.keys(viewLabels) as ViewKey[]).map((view) => (
             <button
               key={view}
@@ -3793,17 +4119,19 @@ function App() {
           ))}
         </nav>
 
-        <section className="sidebar-card">
-          <span className="micro-label">Mes operativo</span>
-          <strong>{currentMonthKey}</strong>
-          <p>{dateFormatter.format(now)}</p>
-        </section>
+        <div className="sidebar-support">
+          <section className="sidebar-card">
+            <span className="micro-label">Mes operativo</span>
+            <strong>{currentMonthKey}</strong>
+            <p>{dateFormatter.format(now)}</p>
+          </section>
 
-        <section className="sidebar-card muted">
-          <span className="micro-label">Recomendacion</span>
-          <p>{coachingMessage}</p>
-          <small>Persistencia: {supabaseConfigured ? `Supabase + ${syncSource}` : 'localStorage'}</small>
-        </section>
+          <section className="sidebar-card muted">
+            <span className="micro-label">Recomendacion</span>
+            <p>{coachingMessage}</p>
+            <small>Persistencia: {supabaseConfigured ? `Supabase + ${syncSource}` : 'localStorage'}</small>
+          </section>
+        </div>
       </aside>
 
       <section className="workspace">
@@ -3832,6 +4160,23 @@ function App() {
         {activeView === 'deudas' && renderDebtsView()}
         {activeView === 'configuracion' && renderSettingsView()}
       </section>
+
+      <nav className="mobile-dock">
+        {(Object.keys(viewLabels) as ViewKey[]).map((view) => (
+          <button
+            key={view}
+            type="button"
+            className={view === activeView ? 'mobile-dock-item active' : 'mobile-dock-item'}
+            onClick={() => setActiveView(view)}
+            aria-label={viewLabels[view]}
+          >
+            <span className="mobile-dock-icon" aria-hidden="true">
+              {getViewIcon(view)}
+            </span>
+            <span className="mobile-dock-label">{viewLabels[view]}</span>
+          </button>
+        ))}
+      </nav>
     </main>
   )
 }

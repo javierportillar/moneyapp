@@ -1,14 +1,14 @@
 import type { PersistedEnvelope, RemoteSnapshotDriver } from './persistence'
-import { supabase } from './supabaseClient'
+import { getSupabaseClient } from './supabaseClient'
 
 const FINANCE_TABLE = import.meta.env.VITE_SUPABASE_FINANCE_TABLE || 'finance_snapshots'
 
 export function createSupabaseSnapshotDriver<T>(profileId?: string | null): RemoteSnapshotDriver<T> | null {
-  if (!supabase || !profileId) {
+  const client = getSupabaseClient()
+
+  if (!client || !profileId) {
     return null
   }
-
-  const client = supabase
 
   return {
     configured: true,

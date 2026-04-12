@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
-import { isSupabaseConfigured, supabase } from '../services/supabaseClient'
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  setSessionToken,
+  SIMPLE_SESSION_KEY,
+} from '../services/supabaseClient'
 
 type SimpleUser = {
+  id: string
   username: string
   cedula: string
   nombre?: string | null
   typeuser?: 'admin' | 'user' | null
 }
-
-const SESSION_KEY = 'finpilot-simple-session'
 
 export function useSimpleUsersAuth() {
   const [user, setUser] = useState<SimpleUser | null>(null)
@@ -21,8 +25,8 @@ export function useSimpleUsersAuth() {
       return
     }
 
-    const storedUsername = localStorage.getItem(SESSION_KEY)
-    if (!storedUsername) {
+    const storedToken = localStorage.getItem(SIMPLE_SESSION_KEY)
+    if (!storedToken) {
       setIsLoading(false)
       return
     }
@@ -31,21 +35,27 @@ export function useSimpleUsersAuth() {
 
     ;(async () => {
       try {
-        const { data, error } = await supabase!
-          .from('usuarios')
-          .select('username, cedula, nombre, typeuser')
-          .eq('username', storedUsername)
-          .maybeSingle()
+        const client = getSupabaseClient()
+        if (!client) {
+          setIsLoading(false)
+          return
+        }
+
+        const { data, error } = await client.rpc('usuario_actual_simple')
 
         if (!active) return
+
+        const currentUser = Array.isArray(data) ? data[0] : data
+
         if (error) {
           setAuthError(error.message)
-          localStorage.removeItem(SESSION_KEY)
-        } else if (data?.username) {
-          setUser(data)
+          setSessionToken(null)
+        } else if (currentUser?.id) {
+          setUser(currentUser)
         } else {
-          localStorage.removeItem(SESSION_KEY)
+          setSessionToken(null)
         }
+
         setIsLoading(false)
       } catch (error) {
         if (!active) return
@@ -60,52 +70,69 @@ export function useSimpleUsersAuth() {
   }, [])
 
   async function signIn(username: string, password: string) {
-    if (!supabase) return { error: 'Supabase no esta configurado.' }
+    const client = getSupabaseClient()
+    if (!client) return { error: 'Supabase no esta configurado.' }
 
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('username, cedula, nombre, password, typeuser')
-      .eq('username', username)
-      .maybeSingle()
+    const { data, error } = await client.rpc('iniciar_sesion_simple', {
+      p_username: username,
+      p_password: password,
+    })
 
     if (error) return { error: error.message }
-    if (!data) return { error: 'El username no existe.' }
-    if (data.password !== password) return { error: 'La contrasena no coincide.' }
 
-    localStorage.setItem(SESSION_KEY, data.username)
-    setUser({ username: data.username, cedula: data.cedula, nombre: data.nombre, typeuser: data.typeuser })
+    const sessionPayload = Array.isArray(data) ? data[0] : data
+    if (!sessionPayload?.token) return { error: 'No se pudo crear la sesion.' }
+
+    setSessionToken(sessionPayload.token)
+    setUser({
+      id: sessionPayload.id,
+      username: sessionPayload.username,
+      cedula: sessionPayload.cedula,
+      nombre: sessionPayload.nombre,
+      typeuser: sessionPayload.typeuser,
+    })
     setAuthError(null)
     return { error: null }
   }
 
   async function signUp(username: string, cedula: string, password: string) {
-    if (!supabase) return { error: 'Supabase no esta configurado.' }
+    const client = getSupabaseClient()
+    if (!client) return { error: 'Supabase no esta configurado.' }
 
-    const payload = {
-      username,
-      cedula,
-      password,
-      nombre: `Usuario ${cedula}`,
-      typeuser: 'user' as const,
-    }
-
-    const { data, error } = await supabase
-      .from('usuarios')
-      .insert(payload)
-      .select('username, cedula, nombre, typeuser')
-      .single()
+    const { data, error } = await client.rpc('registrar_usuario_simple', {
+      p_username: username,
+      p_cedula: cedula,
+      p_password: password,
+      p_nombre: `Usuario ${cedula}`,
+    })
 
     if (error) return { error: error.message }
 
-    localStorage.setItem(SESSION_KEY, data.username)
-    setUser(data)
+    const sessionPayload = Array.isArray(data) ? data[0] : data
+    if (!sessionPayload?.token) return { error: 'No se pudo crear la sesion inicial.' }
+
+    setSessionToken(sessionPayload.token)
+    setUser({
+      id: sessionPayload.id,
+      username: sessionPayload.username,
+      cedula: sessionPayload.cedula,
+      nombre: sessionPayload.nombre,
+      typeuser: sessionPayload.typeuser,
+    })
     setAuthError(null)
     return { error: null }
   }
 
-  function signOut() {
-    localStorage.removeItem(SESSION_KEY)
-    setUser(null)
+  async function signOut() {
+    const client = getSupabaseClient()
+    try {
+      if (client) {
+        await client.rpc('cerrar_sesion_simple')
+      }
+    } finally {
+      setSessionToken(null)
+      setUser(null)
+    }
   }
 
   return {

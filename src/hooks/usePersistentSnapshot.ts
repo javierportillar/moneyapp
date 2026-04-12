@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadPersistedState, savePersistedState } from '../services/persistence'
 import type { RemoteSnapshotDriver } from '../services/persistence'
+import type { Dispatch, SetStateAction } from 'react'
 
 export function usePersistentSnapshot<T>(options: {
   storageKey: string
@@ -27,6 +28,13 @@ export function usePersistentSnapshot<T>(options: {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const remoteRef = useRef(options.remote)
+  const skipNextSaveRef = useRef(true)
+  const hasUserChangesRef = useRef(false)
+
+  const setPersistedState: Dispatch<SetStateAction<T>> = (value) => {
+    hasUserChangesRef.current = true
+    setState(value)
+  }
 
   useEffect(() => {
     remoteRef.current = options.remote
@@ -35,6 +43,8 @@ export function usePersistentSnapshot<T>(options: {
   useEffect(() => {
     let active = true
     setIsReady(false)
+    skipNextSaveRef.current = true
+    hasUserChangesRef.current = false
 
     loadPersistedState({
       storageKey: options.storageKey,
@@ -48,11 +58,15 @@ export function usePersistentSnapshot<T>(options: {
         setState(result.envelope.state)
         setSyncSource(result.source)
         setLastSyncedAt(result.envelope.updatedAt)
+        skipNextSaveRef.current = true
+        hasUserChangesRef.current = false
         setIsReady(true)
       })
       .catch((error) => {
         if (!active) return
         setSyncError(error instanceof Error ? error.message : 'No se pudo cargar la persistencia.')
+        skipNextSaveRef.current = true
+        hasUserChangesRef.current = false
         setIsReady(true)
       })
 
@@ -63,6 +77,11 @@ export function usePersistentSnapshot<T>(options: {
 
   useEffect(() => {
     if (!isReady) return
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false
+      return
+    }
+    if (!hasUserChangesRef.current) return
 
     savePersistedState({
       storageKey: options.storageKey,
@@ -74,6 +93,7 @@ export function usePersistentSnapshot<T>(options: {
         setSyncSource(result.source)
         setLastSyncedAt(result.envelope.updatedAt)
         setSyncError(null)
+        hasUserChangesRef.current = false
       })
       .catch((error) => {
         setSyncError(error instanceof Error ? error.message : 'No se pudo guardar la informacion.')
@@ -82,7 +102,7 @@ export function usePersistentSnapshot<T>(options: {
 
   return {
     state,
-    setState,
+    setState: setPersistedState,
     isReady,
     syncSource,
     syncError,
