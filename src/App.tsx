@@ -255,21 +255,18 @@ function SectionFrame({
           </div>
           {subtitle ? <div className="section-frame-subtitle">{subtitle}</div> : null}
         </div>
-        <div className="section-frame-actions">
-          {actions}
-          <button type="button" className="section-toggle-button" onClick={onToggle} aria-expanded={!collapsed}>
-            <span>{collapsed ? 'Expandir' : 'Minimizar'}</span>
-            <LuChevronDown className={collapsed ? 'section-toggle-icon' : 'section-toggle-icon open'} />
-          </button>
-        </div>
       </div>
+      <button type="button" className="section-toggle-corner" onClick={onToggle} aria-expanded={!collapsed} aria-label={collapsed ? 'Expandir' : 'Minimizar'}>
+        <LuChevronDown className={collapsed ? 'section-toggle-icon' : 'section-toggle-icon open'} />
+      </button>
+      {actions && <div className="section-frame-actions-corner">{actions}</div>}
       {!collapsed && <div className="section-frame-body">{children}</div>}
     </section>
   )
 }
 
 function App() {
-  const [isConsolidatedOpen, setIsConsolidatedOpen] = useState(window.innerWidth > 820)
+
   const now = new Date()
   const today = formatDateISO(now)
   const currentMonthKey = today.slice(0, 7)
@@ -409,14 +406,6 @@ function App() {
     editingUsername: '',
   })
   const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'configuracion']
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsConsolidatedOpen(window.innerWidth > 820)
-    }
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   useEffect(() => {
     setIsMobileMenuOpen(false)
@@ -2188,37 +2177,50 @@ function App() {
           <article className="portfolio-card">
             <div className="portfolio-head">
               <div>
-                <span className="micro-label">Posicion consolidada</span>
+                <span className="micro-label">Balance</span>
                 <strong>{money.format(totals.pocketBalance)}</strong>
                 <p className="panel-subtitle">Total conciliado entre saldo arrastrado e impacto del mes actual.</p>
               </div>
               <small>{totals.netFlow >= 0 ? 'Flujo positivo' : 'Flujo negativo'}</small>
             </div>
-            <div className={`collapsible-content ${isConsolidatedOpen ? 'open' : ''}`}>
-              <div className="portfolio-metrics summary-reconciliation-grid">
-                <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('ingresos')}>
+            <div className="portfolio-metrics summary-reconciliation-grid">
+              <div className="reconciliation-row interactive expandable-row" onClick={() => setActiveSummaryBreakdown('ingresos')}>
+                <div className="expandable-row-content">
                   <span className="reconciliation-label">Ingresos del mes</span>
                   <strong style={{ color: 'var(--success)' }}>{money.format(totals.totalIncomes)}</strong>
                 </div>
-                <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('gastos')}>
+                <button type="button" className="expand-arrow-btn" aria-label="Ver detalle">
+                  <LuChevronDown />
+                </button>
+              </div>
+              <div className="reconciliation-row interactive expandable-row" onClick={() => setActiveSummaryBreakdown('gastos')}>
+                <div className="expandable-row-content">
                   <span className="reconciliation-label">Gastos del mes</span>
                   <strong>{money.format(totals.totalExpenses)}</strong>
                 </div>
-                {totals.carriedBalance !== 0 && (
-                  <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('saldoAnterior')}>
+                <button type="button" className="expand-arrow-btn" aria-label="Ver detalle">
+                  <LuChevronDown />
+                </button>
+              </div>
+              {totals.carriedBalance !== 0 && (
+                <div className="reconciliation-row interactive expandable-row" onClick={() => setActiveSummaryBreakdown('saldoAnterior')}>
+                  <div className="expandable-row-content">
                     <span className="reconciliation-label">Saldo arrastrado</span>
                     <strong className={totals.carriedBalance >= 0 ? 'value-positive' : 'value-negative'}>
                       {money.format(totals.carriedBalance)}
                     </strong>
                   </div>
-                )}
-                <div className="reconciliation-row total-row">
-                  <MetricLabel
-                    label="Saldo total conciliado"
-                    info="Resultado real disponible: saldo arrastrado de meses anteriores más el flujo neto del mes actual. Debe coincidir con el total distribuido en tus bolsillos."
-                  />
-                  <strong style={{ fontSize: '1.1em' }}>{money.format(totals.totalExplainedBalance)}</strong>
+                  <button type="button" className="expand-arrow-btn" aria-label="Ver detalle">
+                    <LuChevronDown />
+                  </button>
                 </div>
+              )}
+              <div className="reconciliation-row total-row">
+                <MetricLabel
+                  label="Saldo total conciliado"
+                  info="Resultado real disponible: saldo arrastrado de meses anteriores más el flujo neto del mes actual. Debe coincidir con el total distribuido en tus bolsillos."
+                />
+                <strong style={{ fontSize: '1.1em' }}>{money.format(totals.totalExplainedBalance)}</strong>
               </div>
             </div>
           </article>
@@ -2244,73 +2246,71 @@ function App() {
         </section>
 
         {activeSummaryBreakdown && (
-          <section className="panel banking-panel summary-detail-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Detalle</span>
-                <h2>
-                  {activeSummaryBreakdown === 'ingresos'
-                    ? 'Detalle de ingresos'
-                    : activeSummaryBreakdown === 'gastos'
-                      ? 'Detalle de gastos'
-                      : 'Detalle del saldo arrastrado'}
-                </h2>
-              </div>
-              <button type="button" className="secondary-button slim" onClick={() => setActiveSummaryBreakdown(null)}>
-                Cerrar
-              </button>
+          <FullscreenComposer
+            isOpen={true}
+            label="Detalle"
+            title={
+              activeSummaryBreakdown === 'ingresos'
+                ? 'Detalle de ingresos'
+                : activeSummaryBreakdown === 'gastos'
+                  ? 'Detalle de gastos'
+                  : 'Detalle del saldo arrastrado'
+            }
+            description="Movimientos que componen este total"
+            onClose={() => setActiveSummaryBreakdown(null)}
+          >
+            <div className="summary-detail-list">
+              {activeSummaryBreakdown === 'ingresos' && (
+                <>
+                  {summaryDrilldown.ingresos.map((item) => (
+                    <article key={item.id} className="summary-detail-row">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.date} · {item.meta}</p>
+                      </div>
+                      <strong className="value-positive">{money.format(item.amount)}</strong>
+                    </article>
+                  ))}
+                  {summaryDrilldown.ingresos.length === 0 && <p className="empty-copy">No hay ingresos en este mes.</p>}
+                </>
+              )}
+
+              {activeSummaryBreakdown === 'gastos' && (
+                <>
+                  {summaryDrilldown.gastos.map((item) => (
+                    <article key={item.id} className="summary-detail-row">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.date} · {item.meta}</p>
+                      </div>
+                      <strong className="value-negative">-{money.format(item.amount)}</strong>
+                    </article>
+                  ))}
+                  {summaryDrilldown.gastos.length === 0 && <p className="empty-copy">No hay gastos en este mes.</p>}
+                </>
+              )}
+
+              {activeSummaryBreakdown === 'saldoAnterior' && (
+                <>
+                  {summaryDrilldown.saldoAnterior.map((item) => (
+                    <article key={item.monthKey} className="summary-detail-row">
+                      <div>
+                        <strong>{item.monthKey}</strong>
+                        <p>Ingresos {money.format(item.income)} · Gastos {money.format(item.expense)}</p>
+                      </div>
+                      <strong className={item.net >= 0 ? 'value-positive' : 'value-negative'}>
+                        {item.net >= 0 ? '+' : ''}
+                        {money.format(item.net)}
+                      </strong>
+                    </article>
+                  ))}
+                  {summaryDrilldown.saldoAnterior.length === 0 && (
+                    <p className="empty-copy">No hay meses anteriores con movimientos para justificar saldo arrastrado.</p>
+                  )}
+                </>
+              )}
             </div>
-
-            {activeSummaryBreakdown === 'ingresos' && (
-              <div className="summary-detail-list">
-                {summaryDrilldown.ingresos.map((item) => (
-                  <article key={item.id} className="summary-detail-row">
-                    <div>
-                      <strong>{item.title}</strong>
-                      <p>{item.date} · {item.meta}</p>
-                    </div>
-                    <strong className="value-positive">{money.format(item.amount)}</strong>
-                  </article>
-                ))}
-                {summaryDrilldown.ingresos.length === 0 && <p className="empty-copy">No hay ingresos en este mes.</p>}
-              </div>
-            )}
-
-            {activeSummaryBreakdown === 'gastos' && (
-              <div className="summary-detail-list">
-                {summaryDrilldown.gastos.map((item) => (
-                  <article key={item.id} className="summary-detail-row">
-                    <div>
-                      <strong>{item.title}</strong>
-                      <p>{item.date} · {item.meta}</p>
-                    </div>
-                    <strong className="value-negative">-{money.format(item.amount)}</strong>
-                  </article>
-                ))}
-                {summaryDrilldown.gastos.length === 0 && <p className="empty-copy">No hay gastos en este mes.</p>}
-              </div>
-            )}
-
-            {activeSummaryBreakdown === 'saldoAnterior' && (
-              <div className="summary-detail-list">
-                {summaryDrilldown.saldoAnterior.map((item) => (
-                  <article key={item.monthKey} className="summary-detail-row">
-                    <div>
-                      <strong>{item.monthKey}</strong>
-                      <p>Ingresos {money.format(item.income)} · Gastos {money.format(item.expense)}</p>
-                    </div>
-                    <strong className={item.net >= 0 ? 'value-positive' : 'value-negative'}>
-                      {item.net >= 0 ? '+' : ''}
-                      {money.format(item.net)}
-                    </strong>
-                  </article>
-                ))}
-                {summaryDrilldown.saldoAnterior.length === 0 && (
-                  <p className="empty-copy">No hay meses anteriores con movimientos para justificar saldo arrastrado.</p>
-                )}
-              </div>
-            )}
-          </section>
+          </FullscreenComposer>
         )}
 
         <section className="analytics-grid">
@@ -4387,29 +4387,32 @@ function App() {
     <main className="banking-app">
       <aside className="sidebar">
         <div className="sidebar-brand-row">
-          <div className="brand">
+          <div className="brand unified-brand-header">
             <div className="brand-mark">
               <LuWallet />
             </div>
             <div className="brand-copy">
               <strong>MoneyApp</strong>
-              <p>Control financiero</p>
+              <p className="brand-subtitle">PANEL FINANCIERO</p>
             </div>
           </div>
+          {auth.user && (
+            <section className="unified-user-panel">
+              <div className="unified-user-greeting">
+                <span className="micro-label">Bienvenido</span>
+                <strong>Hola, {auth.user.nombre?.split(' ')[0] || `@${auth.user.username}`}</strong>
+              </div>
+              <div className="unified-user-info">
+                <p>@{auth.user.username}</p>
+                <p>{auth.user.cedula}</p>
+                <span className="user-type-badge">{auth.user.typeuser ?? 'user'}</span>
+              </div>
+              <button type="button" className="sidebar-logout-btn" onClick={() => auth.signOut()}>
+                Cerrar sesion
+              </button>
+            </section>
+          )}
         </div>
-
-        {auth.user && (
-          <section className="sidebar-card sidebar-user-card">
-            <span className="micro-label">Usuario</span>
-            <strong>{auth.user.nombre || `@${auth.user.username}`}</strong>
-            <p>@{auth.user.username}</p>
-            <p>{auth.user.cedula}</p>
-            <p>{auth.user.typeuser ?? 'user'}</p>
-            <button type="button" className="secondary-button cancel-action" onClick={() => auth.signOut()}>
-              Cerrar sesion
-            </button>
-          </section>
-        )}
 
         <nav className="sidebar-nav desktop-nav">
           {orderedViews.map((view) => (
