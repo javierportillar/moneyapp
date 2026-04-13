@@ -72,12 +72,6 @@ function normalize(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
 
-function tokenize(text: string) {
-  return normalize(text)
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 2)
-}
-
 function predictCategory(description: string, rules: LearningRule[]) {
   const text = normalize(description)
   const scores = new Map<Category, number>()
@@ -252,11 +246,13 @@ function App() {
   const [activeModule, setActiveModule] = useState<ModuleKey>('gasto')
   const [openComposer, setOpenComposer] = useState<ComposerView | null>(null)
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
+  const [openPocketDetailId, setOpenPocketDetailId] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
   const [authForm, setAuthForm] = useState({ username: '', cedula: '', password: '' })
   const [authFeedback, setAuthFeedback] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [showAuthPassword, setShowAuthPassword] = useState(false)
+  const [activeSummaryBreakdown, setActiveSummaryBreakdown] = useState<'ingresos' | 'gastos' | 'saldoAnterior' | null>(null)
   const isAdminUser = auth.user?.typeuser === 'admin'
 
   useEffect(() => {
@@ -339,6 +335,7 @@ function App() {
   })
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
+  const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
   const [fixedPaymentDraft, setFixedPaymentDraft] = useState<{
     fixedId: string
     pocketId: string
@@ -565,6 +562,7 @@ function App() {
         id: income.id,
         date: income.date,
         kind: 'ingreso' as const,
+        source: 'manual' as const,
         editable: true,
         deletable: true,
         title: income.title,
@@ -577,6 +575,7 @@ function App() {
         id: transfer.id,
         date: transfer.date,
         kind: 'transferencia' as const,
+        source: 'transfer' as const,
         editable: true,
         deletable: true,
         title: transfer.note || 'Transferencia interna',
@@ -612,6 +611,7 @@ function App() {
         id: income.id,
         date: income.date,
         kind: 'ingreso' as const,
+        source: 'manual' as const,
         editable: true,
         deletable: true,
         title: income.title,
@@ -624,6 +624,7 @@ function App() {
         id: transfer.id,
         date: transfer.date,
         kind: 'transferencia' as const,
+        source: 'transfer' as const,
         editable: true,
         deletable: true,
         title: transfer.note || 'Transferencia interna',
@@ -642,21 +643,13 @@ function App() {
 
   const selectedPocket = state.pockets.find((pocket) => pocket.id === selectedPocketId) ?? state.pockets[0]
 
-  const selectedPocketActivity = useMemo(
-    () => activity.filter((item) => item.pocketIds.includes(selectedPocketId)),
-    [activity, selectedPocketId],
-  )
-
   const filteredActivity = useMemo(() => {
     return movementActivity
       .filter((item) => {
         const matchesPocket =
           movementFilters.pocketId === 'todos' || item.pocketIds.includes(movementFilters.pocketId)
         const matchesKind = movementFilters.kind === 'todos' || item.kind === movementFilters.kind
-        const matchesQuery =
-          !movementFilters.query ||
-          normalize(`${item.title} ${item.meta} ${item.detail}`).includes(normalize(movementFilters.query))
-        return matchesPocket && matchesKind && matchesQuery
+        return matchesPocket && matchesKind
       })
       .map((item) => {
         if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
@@ -680,16 +673,7 @@ function App() {
             : `Entrada por transferencia desde ${transferPocketName}`,
         }
       })
-  }, [movementActivity, movementFilters, state.pockets, state.transfers])
-
-  const groupedFilteredActivity = useMemo(() => {
-    return filteredActivity.reduce<Record<string, typeof filteredActivity>>((acc, item) => {
-      const groupKey = movementFilters.groupBy === 'mes' ? item.date.slice(0, 7) : item.date
-      if (!acc[groupKey]) acc[groupKey] = []
-      acc[groupKey].push(item)
-      return acc
-    }, {})
-  }, [filteredActivity, movementFilters.groupBy])
+  }, [movementActivity, movementFilters.kind, movementFilters.pocketId, state.pockets, state.transfers])
 
   const movementSummary = useMemo(() => {
     const inflow = filteredActivity
@@ -707,6 +691,51 @@ function App() {
       count: filteredActivity.length,
     }
   }, [filteredActivity])
+
+  const summaryDrilldown = useMemo(() => {
+    const previousMonths = Array.from(
+      new Set(
+        state.incomes
+          .map((item) => item.date.slice(0, 7))
+          .concat(state.expenses.map((item) => item.date.slice(0, 7)))
+          .filter((monthKey) => monthKey < currentMonthKey),
+      ),
+    )
+      .sort((a, b) => (a < b ? 1 : -1))
+      .map((monthKey) => {
+        const income = state.incomes
+          .filter((item) => item.date.startsWith(monthKey))
+          .reduce((sum, item) => sum + item.amount, 0)
+        const expense = state.expenses
+          .filter((item) => item.date.startsWith(monthKey))
+          .reduce((sum, item) => sum + item.amount, 0)
+
+        return {
+          monthKey,
+          income,
+          expense,
+          net: income - expense,
+        }
+      })
+
+    return {
+      ingresos: monthIncomes.map((income) => ({
+        id: income.id,
+        title: income.title,
+        date: income.date,
+        amount: income.amount,
+        meta: getPocketName(state.pockets, income.pocketId),
+      })),
+      gastos: monthExpenses.map((expense) => ({
+        id: expense.id,
+        title: expense.description,
+        date: expense.date,
+        amount: expense.amount,
+        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
+      })),
+      saldoAnterior: previousMonths,
+    }
+  }, [currentMonthKey, monthExpenses, monthIncomes, state.expenses, state.incomes, state.pockets])
 
   const summaryAnalytics = useMemo(() => {
     const maxFlowBase = Math.max(
@@ -880,6 +909,20 @@ function App() {
     if (activeView === 'deudas') {
       resetDebtForm()
       openComposerForView('deudas')
+      return
+    }
+
+    jumpToView('movimientos')
+  }
+
+  function openMovementOrigin(kind: MovementKind, source?: string) {
+    if (kind === 'gasto' && source === 'fixed') {
+      jumpToView('programacion')
+      return
+    }
+
+    if (kind === 'gasto' && source === 'debt') {
+      jumpToView('deudas')
       return
     }
 
@@ -1091,29 +1134,6 @@ function App() {
     if (transferForm.id === movementId) resetTransferForm()
   }
 
-  function handleExportMovements() {
-    const header = ['fecha', 'tipo', 'titulo', 'meta', 'detalle', 'valor']
-    const rows = filteredActivity.map((item) => [
-      item.date,
-      item.kind,
-      item.title,
-      item.meta,
-      item.detail,
-      String(item.amount),
-    ])
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
-      .join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `movimientos-${movementMonthKey}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
   function handleAddExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const numericAmount = Number(expenseForm.amount)
@@ -1307,30 +1327,6 @@ function App() {
 
     resetPocketForm()
     setOpenComposer(null)
-  }
-
-  function handleCategoryCorrection(expenseId: string, category: Category) {
-    setState((current) => {
-      const expense = current.expenses.find((item) => item.id === expenseId)
-      if (!expense) return current
-
-      const keywords = tokenize(expense.description).slice(0, 3)
-      const nextRules = [...current.learningRules]
-
-      keywords.forEach((keyword) => {
-        const index = nextRules.findIndex((rule) => rule.keyword === keyword)
-        if (index >= 0) nextRules[index] = { keyword, category, hits: nextRules[index].hits + 1 }
-        else nextRules.push({ keyword, category, hits: 1 })
-      })
-
-      return {
-        ...current,
-        learningRules: nextRules,
-        expenses: current.expenses.map((item) =>
-          item.id === expenseId ? { ...item, category, confidence: 0.99 } : item,
-        ),
-      }
-    })
   }
 
   function handlePayFixedExpense(fixedId: string, paymentPocketId?: string, paymentDate?: string) {
@@ -2139,26 +2135,17 @@ function App() {
             </div>
             <div className={`collapsible-content ${isConsolidatedOpen ? 'open' : ''}`}>
               <div className="portfolio-metrics summary-reconciliation-grid">
-                <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
-                  <MetricLabel
-                    label="Ingresos del mes"
-                    info="Entradas registradas en el mes activo. No incluye traslados internos entre bolsillos."
-                  />
+                <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('ingresos')}>
+                  <span className="reconciliation-label">Ingresos del mes</span>
                   <strong style={{ color: 'var(--success)' }}>{money.format(totals.totalIncomes)}</strong>
                 </div>
-                <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
-                  <MetricLabel
-                    label="Gastos del mes"
-                    info="Salidas registradas en el mes activo, incluyendo pagos de deudas y obligaciones."
-                  />
+                <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('gastos')}>
+                  <span className="reconciliation-label">Gastos del mes</span>
                   <strong>{money.format(totals.totalExpenses)}</strong>
                 </div>
                 {totals.carriedBalance !== 0 && (
-                  <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
-                    <MetricLabel
-                      label="Saldo arrastrado"
-                      info="Saldo acumulado antes del mes actual. Si venías con dinero a favor o en contra, aquí se justifica la diferencia frente al total."
-                    />
+                  <div className="reconciliation-row interactive" onClick={() => setActiveSummaryBreakdown('saldoAnterior')}>
+                    <span className="reconciliation-label">Saldo arrastrado</span>
                     <strong className={totals.carriedBalance >= 0 ? 'value-positive' : 'value-negative'}>
                       {money.format(totals.carriedBalance)}
                     </strong>
@@ -2194,6 +2181,76 @@ function App() {
             </div>
           </article>
         </section>
+
+        {activeSummaryBreakdown && (
+          <section className="panel banking-panel summary-detail-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Detalle</span>
+                <h2>
+                  {activeSummaryBreakdown === 'ingresos'
+                    ? 'Detalle de ingresos'
+                    : activeSummaryBreakdown === 'gastos'
+                      ? 'Detalle de gastos'
+                      : 'Detalle del saldo arrastrado'}
+                </h2>
+              </div>
+              <button type="button" className="secondary-button slim" onClick={() => setActiveSummaryBreakdown(null)}>
+                Cerrar
+              </button>
+            </div>
+
+            {activeSummaryBreakdown === 'ingresos' && (
+              <div className="summary-detail-list">
+                {summaryDrilldown.ingresos.map((item) => (
+                  <article key={item.id} className="summary-detail-row">
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.date} · {item.meta}</p>
+                    </div>
+                    <strong className="value-positive">{money.format(item.amount)}</strong>
+                  </article>
+                ))}
+                {summaryDrilldown.ingresos.length === 0 && <p className="empty-copy">No hay ingresos en este mes.</p>}
+              </div>
+            )}
+
+            {activeSummaryBreakdown === 'gastos' && (
+              <div className="summary-detail-list">
+                {summaryDrilldown.gastos.map((item) => (
+                  <article key={item.id} className="summary-detail-row">
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.date} · {item.meta}</p>
+                    </div>
+                    <strong className="value-negative">-{money.format(item.amount)}</strong>
+                  </article>
+                ))}
+                {summaryDrilldown.gastos.length === 0 && <p className="empty-copy">No hay gastos en este mes.</p>}
+              </div>
+            )}
+
+            {activeSummaryBreakdown === 'saldoAnterior' && (
+              <div className="summary-detail-list">
+                {summaryDrilldown.saldoAnterior.map((item) => (
+                  <article key={item.monthKey} className="summary-detail-row">
+                    <div>
+                      <strong>{item.monthKey}</strong>
+                      <p>Ingresos {money.format(item.income)} · Gastos {money.format(item.expense)}</p>
+                    </div>
+                    <strong className={item.net >= 0 ? 'value-positive' : 'value-negative'}>
+                      {item.net >= 0 ? '+' : ''}
+                      {money.format(item.net)}
+                    </strong>
+                  </article>
+                ))}
+                {summaryDrilldown.saldoAnterior.length === 0 && (
+                  <p className="empty-copy">No hay meses anteriores con movimientos para justificar saldo arrastrado.</p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="analytics-grid">
           <article className="panel banking-panel analytics-panel">
@@ -2644,6 +2701,75 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          {openPocketDetailId && (
+            <FullscreenComposer
+              isOpen={Boolean(openPocketDetailId)}
+              label="Bolsillo"
+              title={state.pockets.find((pocket) => pocket.id === openPocketDetailId)?.name ?? 'Detalle'}
+              description="Detalle del bolsillo seleccionado."
+              onClose={() => setOpenPocketDetailId(null)}
+            >
+              {(() => {
+                const pocket = state.pockets.find((item) => item.id === openPocketDetailId)
+                if (!pocket) return null
+
+                const pocketActivity = activity.filter((item) => item.pocketIds.includes(pocket.id)).slice(0, 8)
+
+                return (
+                  <section className="pocket-detail-modal">
+                    <div className="pocket-summary-grid">
+                      <div className="summary-box">
+                        <span>Saldo actual</span>
+                        <strong>{money.format(pocketBalances[pocket.id] ?? 0)}</strong>
+                      </div>
+                      <div className="summary-box">
+                        <span>Tipo</span>
+                        <strong>{getPocketTypeLabel(pocket.type)}</strong>
+                      </div>
+                      <div className="summary-box accent">
+                        <span>Identidad</span>
+                        <strong>
+                          <span className="icon-badge inline" style={{ background: pocket.color }}>
+                            {pocket.icon}
+                          </span>
+                          {pocket.name}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="composer-action-row">
+                      <button
+                        type="button"
+                        className="action-trigger"
+                        onClick={() => {
+                          setOpenPocketDetailId(null)
+                          startEditPocket(pocket.id)
+                        }}
+                      >
+                        Editar bolsillo
+                      </button>
+                    </div>
+                    <div className="ledger">
+                      {pocketActivity.map((item) => (
+                        <article key={item.kind + item.id} className="ledger-row">
+                          <div className={`ledger-icon ${item.kind}`}></div>
+                          <div className="ledger-copy">
+                            <strong>{item.title}</strong>
+                            <p>{item.date}</p>
+                          </div>
+                          <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+                            {item.amount >= 0 ? '+' : '-'}
+                            {money.format(Math.abs(item.amount))}
+                          </strong>
+                        </article>
+                      ))}
+                      {pocketActivity.length === 0 && <p className="empty-copy">Este bolsillo no tiene movimientos recientes.</p>}
+                    </div>
+                  </section>
+                )
+              })()}
+            </FullscreenComposer>
+          )}
+
           {openComposer === 'bolsillos' && (
             <section className="panel banking-panel action-panel">
               <div className="composer-toolbar">
@@ -2760,56 +2886,8 @@ function App() {
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Detalle</span>
-                <h2>{selectedPocket.name}</h2>
-              </div>
-              <button className="text-link" type="button" onClick={() => jumpToView('movimientos')}>
-                Ir a movimientos
-              </button>
-            </div>
-            <div className="pocket-summary-grid">
-              <div className="summary-box">
-                <span>Saldo actual</span>
-                <strong>{money.format(pocketBalances[selectedPocket.id] ?? 0)}</strong>
-              </div>
-              <div className="summary-box">
-                <span>Tipo</span>
-                <strong>{getPocketTypeLabel(selectedPocket.type)}</strong>
-              </div>
-              <div className="summary-box accent">
-                <span>Identidad</span>
-                <strong>
-                  <span className="icon-badge inline" style={{ background: selectedPocket.color }}>
-                    {selectedPocket.icon}
-                  </span>
-                  {selectedPocket.name}
-                </strong>
-              </div>
-            </div>
-            <div className="ledger">
-              {selectedPocketActivity.slice(0, 6).map((item) => (
-                <article key={item.kind + item.id} className="ledger-row">
-                  <div className={`ledger-icon ${item.kind}`}></div>
-                  <div className="ledger-copy">
-                    <strong>{item.title}</strong>
-                    <p>
-                      {item.date} · {item.meta}
-                    </p>
-                  </div>
-                  <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                    {item.amount >= 0 ? '+' : '-'}
-                    {money.format(Math.abs(item.amount))}
-                  </strong>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
                 <span className="micro-label">Mapa de bolsillos</span>
-                <h2>Tus cuentas internas</h2>
+                <h2>Tus bolsillos</h2>
               </div>
               <button
                 className="action-trigger"
@@ -2827,7 +2905,10 @@ function App() {
                 <article
                   key={pocket.id}
                   className={pocket.id === selectedPocketId ? 'account-card selected' : 'account-card'}
-                  onClick={() => setSelectedPocketId(pocket.id)}
+                  onClick={() => {
+                    setSelectedPocketId(pocket.id)
+                    setOpenPocketDetailId(pocket.id)
+                  }}
                 >
                   <div className="account-card-top">
                     <div className="card-heading-inline">
@@ -2896,11 +2977,8 @@ function App() {
         <section className="panel banking-panel movement-command-center">
           <div className="movement-command-header">
             <div>
-              <span className="micro-label">Filtro operativo</span>
+              <span className="micro-label">Movimientos</span>
               <h2>Centro de movimientos</h2>
-              <p className="movement-detail">
-                Consulta, registra y exporta la actividad del mes sin perder contexto del bolsillo y el tipo de movimiento.
-              </p>
             </div>
           </div>
 
@@ -2908,123 +2986,73 @@ function App() {
             <div className="movement-command-actions">
               <div className="movement-command-badge">
                 <span>Mes activo</span>
-                <strong>{movementMonthKey}</strong>
+                <strong>
+                  <input
+                    type="month"
+                    value={movementMonthKey}
+                    onChange={(event) => setMovementMonthKey(event.target.value)}
+                    className="movement-month-input"
+                  />
+                </strong>
               </div>
               <div className="movement-command-badge">
                 <span>Resultados</span>
                 <strong>{movementSummary.count}</strong>
               </div>
-              <div className="movement-command-buttons">
-                <button
-                  className="action-trigger"
-                  type="button"
-                  onClick={() => {
-                    resetExpenseForm()
-                    resetIncomeForm()
-                    resetTransferForm()
-                    openComposerForView('movimientos', 'gasto')
-                  }}
-                >
-                  Registrar movimiento
-                </button>
-                <button className="secondary-button" type="button" onClick={handleExportMovements}>
-                  Exportar CSV
-                </button>
-              </div>
             </div>
           </div>
 
-          <div className="movement-filter-layout">
-            <div className="movement-filter-row movement-filter-row-primary">
-              <div className="filter-field month-field compact inline">
-                <span className="filter-field-label">Mes</span>
-                <input
-                  type="month"
-                  value={movementMonthKey}
-                  onChange={(event) => setMovementMonthKey(event.target.value)}
-                />
-              </div>
-              <div className="filter-field search-field expanded inline">
-                <span className="filter-field-label">Buscar</span>
-                <input
-                  value={movementFilters.query}
+          <button
+            className="action-trigger movement-register-button"
+            type="button"
+            onClick={() => {
+              resetExpenseForm()
+              resetIncomeForm()
+              resetTransferForm()
+              openComposerForView('movimientos', 'gasto')
+            }}
+          >
+            Registrar movimiento
+          </button>
+
+          <div className="movement-filter-layout simplified">
+            <div className="filter-field compact inline">
+              <span className="filter-field-label">Bolsillo</span>
+              <div className="filter-select-wrap">
+                <select
+                  value={movementFilters.pocketId}
                   onChange={(event) =>
-                    setMovementFilters((current) => ({ ...current, query: event.target.value }))
+                    setMovementFilters((current) => ({ ...current, pocketId: event.target.value }))
                   }
-                  placeholder="Descripcion, bolsillo o categoria"
-                />
-              </div>
-            </div>
-
-            <div className="movement-filter-row movement-filter-row-secondary">
-              <div className="filter-field filter-select-card compact inline">
-                <span className="filter-field-label">Bolsillo</span>
-                <div className="filter-select-wrap">
-                  <select
-                    value={movementFilters.pocketId}
-                    onChange={(event) =>
-                      setMovementFilters((current) => ({ ...current, pocketId: event.target.value }))
-                    }
-                  >
-                    <option value="todos">Todos los bolsillos</option>
-                    {state.pockets.map((pocket) => (
-                      <option key={pocket.id} value={pocket.id}>
-                        {pocket.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="filter-field filter-select-card compact inline">
-                <span className="filter-field-label">Tipo</span>
-                <div className="filter-select-wrap">
-                  <select
-                    value={movementFilters.kind}
-                    onChange={(event) =>
-                      setMovementFilters((current) => ({
-                        ...current,
-                        kind: event.target.value as 'todos' | MovementKind,
-                      }))
-                    }
-                  >
-                    <option value="todos">Todos</option>
-                    <option value="gasto">Gastos</option>
-                    <option value="ingreso">Ingresos</option>
-                    <option value="transferencia">Transferencias</option>
-                  </select>
-                </div>
-              </div>
-              <div className="filter-field grouping-field compact inline">
-                <span className="filter-field-label">Agrupacion</span>
-                <div className="module-segmented compact">
-                  {(['dia', 'mes'] as const).map((groupBy) => (
-                    <button
-                      key={groupBy}
-                      type="button"
-                      className={movementFilters.groupBy === groupBy ? 'segment active' : 'segment'}
-                      onClick={() => setMovementFilters((current) => ({ ...current, groupBy }))}
-                    >
-                      {groupBy === 'dia' ? 'Por dia' : 'Por mes'}
-                    </button>
+                >
+                  <option value="todos">Todos los bolsillos</option>
+                  {state.pockets.map((pocket) => (
+                    <option key={pocket.id} value={pocket.id}>
+                      {pocket.name}
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
             </div>
-          </div>
-
-          <div className="movement-filter-strip">
-            <span className="movement-filter-strip-label">Filtro activo</span>
-            <strong>
-              {movementFilters.pocketId === 'todos'
-                ? 'Vista global'
-                : getPocketName(state.pockets, movementFilters.pocketId)}
-            </strong>
-            <span>
-              {movementFilters.kind === 'todos'
-                ? 'Todos los tipos'
-                : `Solo ${movementFilters.kind}`}
-            </span>
-            <span>Mes consultado: {movementMonthKey}</span>
+            <div className="filter-field compact inline">
+              <span className="filter-field-label">Tipo</span>
+              <div className="filter-select-wrap">
+                <select
+                  value={movementFilters.kind}
+                  onChange={(event) =>
+                    setMovementFilters((current) => ({
+                      ...current,
+                      kind: event.target.value as 'todos' | MovementKind,
+                    }))
+                  }
+                >
+                  <option value="todos">Todos</option>
+                  <option value="gasto">Gastos</option>
+                  <option value="ingreso">Ingresos</option>
+                  <option value="transferencia">Transferencias</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           <div className="movement-summary-grid refined">
@@ -3048,127 +3076,92 @@ function App() {
             <div className="panel-header">
               <div>
                 <span className="micro-label">Libro mayor</span>
-                <h2>Detalle de movimientos</h2>
+                <h2>Detalle del mes</h2>
               </div>
               <p>{filteredActivity.length} registros visibles</p>
             </div>
-            <div className="ledger grouped-ledger">
-              {Object.entries(groupedFilteredActivity).map(([groupKey, items]) => (
-                <section key={groupKey} className="movement-group">
-                  <div className="movement-group-head">
-                    <strong>{groupKey}</strong>
-                    <span>{items.length} registro(s)</span>
+            <div className="ledger simple-movement-list">
+              {filteredActivity.map((item) => (
+                <article key={item.kind + item.id} className={`simple-movement-row ${item.kind}`}>
+                  <div className="simple-movement-top">
+                    <strong>{item.title}</strong>
+                    <div className="movement-inline-menu">
+                      <button
+                        type="button"
+                        className="edit-icon-button inline"
+                        aria-label={`Acciones de movimiento ${item.title}`}
+                        onClick={() =>
+                          setOpenMovementActionId((current) => (current === item.id ? null : item.id))
+                        }
+                      >
+                        <LuPencil />
+                      </button>
+                      {openMovementActionId === item.id && (
+                        <div className="movement-popover">
+                          {item.editable ? (
+                            <button
+                              type="button"
+                              className="movement-popover-action"
+                              onClick={() => {
+                                setOpenMovementActionId(null)
+                                startEditMovement(item.kind, item.id)
+                              }}
+                            >
+                              Editar movimiento
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="movement-popover-action"
+                              onClick={() => {
+                                setOpenMovementActionId(null)
+                                openMovementOrigin(item.kind, item.source)
+                              }}
+                            >
+                              Abrir origen
+                            </button>
+                          )}
+                          {item.deletable && (
+                            <button
+                              type="button"
+                              className="movement-popover-action danger"
+                              onClick={() => {
+                                setOpenMovementActionId(null)
+                                handleDeleteMovement(item.kind, item.id)
+                              }}
+                            >
+                              Eliminar
+                            </button>
+                          )}
+                          {!item.editable && !item.deletable && (
+                            <p className="movement-popover-note">
+                              Este movimiento se administra desde su modulo de origen.
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="movement-popover-action"
+                            onClick={() => setOpenMovementActionId(null)}
+                          >
+                            Cerrar
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  {items.map((item) => (
-                    <article key={item.kind + item.id} className={`ledger-row movement-row ${item.kind}`}>
-                      <div className={`ledger-icon ${item.kind}`}></div>
-                      <div className="ledger-copy">
-                        <strong>{item.title}</strong>
-                        <p>
-                          {item.date} · {item.meta}
-                        </p>
-                        <p className="movement-detail">{item.detail}</p>
-                      </div>
-                      <div className="movement-actions">
-                        <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                          {item.amount >= 0 ? '+' : '-'}
-                          {money.format(Math.abs(item.amount))}
-                        </strong>
-                        {(item.editable || item.deletable) && (
-                          <div className="movement-action-row">
-                            {item.editable && (
-                              <button
-                                type="button"
-                                className="edit-icon-button inline"
-                                aria-label={`Editar movimiento ${item.title}`}
-                                onClick={() => startEditMovement(item.kind, item.id)}
-                              >
-                                <LuPencil />
-                              </button>
-                            )}
-                            {item.deletable && (
-                              <button
-                                type="button"
-                                className="text-link compact danger"
-                                onClick={() => handleDeleteMovement(item.kind, item.id)}
-                              >
-                                Eliminar
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </section>
+                  <div className="simple-movement-meta">
+                    <p>{item.date}</p>
+                    <strong className={item.kind === 'ingreso' ? 'simple-income' : 'simple-outflow'}>
+                      {item.kind === 'ingreso' ? '+' : '-'}
+                      {money.format(Math.abs(item.amount))}
+                    </strong>
+                  </div>
+                </article>
               ))}
               {filteredActivity.length === 0 && (
                 <p className="empty-copy">No hay movimientos con los filtros seleccionados.</p>
               )}
             </div>
-          </section>
-
-          <section className="movement-insight-grid">
-            <section className="panel banking-panel">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Lectura rapida</span>
-                  <h2>Saldo por bolsillo</h2>
-                </div>
-              </div>
-              <div className="pocket-list-compact movement-pocket-grid">
-                {state.pockets.map((pocket) => (
-                  <article key={pocket.id} className="compact-pocket-row">
-                    <div className="compact-pocket-name">
-                      <span className="icon-badge inline" style={{ background: pocket.color }}>
-                        {pocket.icon}
-                      </span>
-                      <strong>{pocket.name}</strong>
-                    </div>
-                    <span>{money.format(pocketBalances[pocket.id] ?? 0)}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel banking-panel">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Clasificacion</span>
-                  <h2>Revisar IA</h2>
-                </div>
-              </div>
-              <div className="ledger">
-                {movementMonthExpenses.slice(0, 4).map((expense) => (
-                  <article key={expense.id} className="ledger-row editable">
-                    <div className="ledger-copy">
-                      <strong>{expense.description}</strong>
-                      <p>
-                        {expense.date} · {getPocketName(state.pockets, expense.pocketId)}
-                      </p>
-                    </div>
-                    <div className="ledger-actions">
-                      <span>{money.format(expense.amount)}</span>
-                      <select
-                        value={expense.category}
-                        onChange={(event) =>
-                          handleCategoryCorrection(expense.id, event.target.value as Category)
-                        }
-                      >
-                        {state.categories.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </article>
-                ))}
-                {movementMonthExpenses.length === 0 && (
-                  <p className="empty-copy">Sin gastos para auditar este mes.</p>
-                )}
-              </div>
-            </section>
           </section>
         </section>
       </>
@@ -4390,7 +4383,7 @@ function App() {
             <h1>{viewLabels[activeView]}</h1>
             <p className="view-description">{viewDescription}</p>
           </div>
-          <div className="topbar-meta">
+          <div className={activeView === 'movimientos' ? 'topbar-meta topbar-meta-inline' : 'topbar-meta'}>
             <div className="meta-chip">
               <span>Obligaciones pendientes</span>
               <strong>{money.format(totals.pendingFixed)}</strong>
