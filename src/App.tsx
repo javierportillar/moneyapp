@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   LuArrowLeftRight,
+  LuChevronDown,
   LuCircleDollarSign,
   LuEye,
   LuEyeOff,
@@ -219,6 +220,54 @@ function TitleWithInfo({
   )
 }
 
+function SectionFrame({
+  label,
+  title,
+  subtitle,
+  actions,
+  collapsed,
+  onToggle,
+  children,
+  className = '',
+  emphasis = false,
+}: {
+  label: string
+  title: ReactNode
+  subtitle?: ReactNode
+  actions?: ReactNode
+  collapsed: boolean
+  onToggle: () => void
+  children: ReactNode
+  className?: string
+  emphasis?: boolean
+}) {
+  return (
+    <section
+      className={`panel banking-panel section-frame ${emphasis ? 'emphasis' : ''} ${
+        collapsed ? 'is-collapsed' : ''
+      } ${className}`.trim()}
+    >
+      <div className="section-frame-head">
+        <div className="section-frame-copy">
+          <span className="micro-label">{label}</span>
+          <div className="section-frame-title-row">
+            <h2>{title}</h2>
+          </div>
+          {subtitle ? <div className="section-frame-subtitle">{subtitle}</div> : null}
+        </div>
+        <div className="section-frame-actions">
+          {actions}
+          <button type="button" className="section-toggle-button" onClick={onToggle} aria-expanded={!collapsed}>
+            <span>{collapsed ? 'Expandir' : 'Minimizar'}</span>
+            <LuChevronDown className={collapsed ? 'section-toggle-icon' : 'section-toggle-icon open'} />
+          </button>
+        </div>
+      </div>
+      {!collapsed && <div className="section-frame-body">{children}</div>}
+    </section>
+  )
+}
+
 function App() {
   const [isConsolidatedOpen, setIsConsolidatedOpen] = useState(window.innerWidth > 820)
   const now = new Date()
@@ -349,7 +398,8 @@ function App() {
   const [showUserAdminForm, setShowUserAdminForm] = useState(false)
   const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const [mobileMenuSection, setMobileMenuSection] = useState<'navegacion' | 'acciones' | 'contexto'>('navegacion')
+  const [mobileMenuSection, setMobileMenuSection] = useState<'navegacion' | 'atajos' | 'contexto' | null>('navegacion')
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
     cedula: '',
@@ -881,8 +931,19 @@ function App() {
     if (module) setActiveModule(module)
   }
 
-  function toggleMobileMenuSection(section: 'navegacion' | 'acciones' | 'contexto') {
-    setMobileMenuSection((current) => (current === section ? 'navegacion' : section))
+  function toggleMobileMenuSection(section: 'navegacion' | 'atajos' | 'contexto') {
+    setMobileMenuSection((current) => (current === section ? null : section))
+  }
+
+  function isSectionCollapsed(sectionId: string) {
+    return collapsedSections[sectionId] ?? false
+  }
+
+  function toggleSection(sectionId: string) {
+    setCollapsedSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }))
   }
 
   function openPrimaryActionForCurrentView() {
@@ -2514,10 +2575,14 @@ function App() {
 
         <section className="dashboard-grid">
           <div className="primary-column">
-            <section className="panel banking-panel emphasis">
-              <span className="micro-label">Supervisor mensual</span>
-              <h2>Estado operativo</h2>
-              <p>{coachingMessage}</p>
+            <SectionFrame
+              label="Supervisor mensual"
+              title="Estado operativo"
+              subtitle={coachingMessage}
+              collapsed={isSectionCollapsed('summary-operativo')}
+              onToggle={() => toggleSection('summary-operativo')}
+              emphasis
+            >
               <div className="status-grid">
                 <div>
                   <span>Pendientes</span>
@@ -2536,7 +2601,7 @@ function App() {
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionFrame>
 
             <section className="panel banking-panel">
               <div className="panel-header">
@@ -2567,14 +2632,13 @@ function App() {
               </div>
             </section>
 
-            <section className="panel banking-panel">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Centro transaccional</span>
-                  <h2>{moduleLabels[activeModule]}</h2>
-                </div>
-                <p>{getModuleSummary(activeModule)}</p>
-              </div>
+            <SectionFrame
+              label="Centro transaccional"
+              title={moduleLabels[activeModule]}
+              subtitle={getModuleSummary(activeModule)}
+              collapsed={isSectionCollapsed('summary-transaccional')}
+              onToggle={() => toggleSection('summary-transaccional')}
+            >
               <div className="module-segmented">
                 {(Object.keys(moduleLabels) as ModuleKey[]).map((module) => (
                   <button
@@ -2588,17 +2652,16 @@ function App() {
                 ))}
               </div>
               {renderActiveForm()}
-            </section>
+            </SectionFrame>
           </div>
 
           <aside className="secondary-column">
-            <section className="panel banking-panel">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Bolsillos</span>
-                  <h2>Saldos por bolsillo</h2>
-                </div>
-              </div>
+            <SectionFrame
+              label="Bolsillos"
+              title="Saldos por bolsillo"
+              collapsed={isSectionCollapsed('summary-bolsillos')}
+              onToggle={() => toggleSection('summary-bolsillos')}
+            >
               <div className="account-strip">
                 {state.pockets.map((pocket) => (
                   <article key={pocket.id} className="account-card">
@@ -2613,7 +2676,7 @@ function App() {
                   </article>
                 ))}
               </div>
-            </section>
+            </SectionFrame>
 
             <section className="panel banking-panel">
               <div className="panel-header">
@@ -2883,12 +2946,12 @@ function App() {
             </section>
           )}
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Mapa de bolsillos</span>
-                <h2>Tus bolsillos</h2>
-              </div>
+          <SectionFrame
+            label="Mapa de bolsillos"
+            title="Tus bolsillos"
+            collapsed={isSectionCollapsed('pockets-grid')}
+            onToggle={() => toggleSection('pockets-grid')}
+            actions={
               <button
                 className="action-trigger"
                 type="button"
@@ -2899,7 +2962,8 @@ function App() {
               >
                 Registrar bolsillo
               </button>
-            </div>
+            }
+          >
             <div className="account-strip two-cols">
               {state.pockets.map((pocket) => (
                 <article
@@ -2934,7 +2998,7 @@ function App() {
                 </article>
               ))}
             </div>
-          </section>
+          </SectionFrame>
         </div>
       </section>
     )
@@ -3425,14 +3489,14 @@ function App() {
               </article>
             </section>
 
-            <section className="obligation-list-board">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Listado operativo</span>
-                  <h3>Obligaciones registradas</h3>
-                </div>
-                <p>{state.fixedExpenses.length} registro(s)</p>
-              </div>
+            <SectionFrame
+              label="Listado operativo"
+              title="Obligaciones registradas"
+              subtitle={`${state.fixedExpenses.length} registro(s)`}
+              collapsed={isSectionCollapsed('programacion-obligaciones')}
+              onToggle={() => toggleSection('programacion-obligaciones')}
+              className="obligation-list-board"
+            >
               <div className="fixed-stack">
               {state.fixedExpenses
                 .sort((a, b) => a.dueDay - b.dueDay)
@@ -3487,7 +3551,7 @@ function App() {
                   )
                 })}
               </div>
-            </section>
+            </SectionFrame>
             </section>
           </div>
 
@@ -3517,10 +3581,14 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
-          <section className="panel banking-panel emphasis">
-            <span className="micro-label">Resumen de deuda</span>
-            <h2>Saldo pendiente</h2>
-            <p>Las deudas desaparecen automaticamente de la lista activa al llegar a 0.</p>
+          <SectionFrame
+            label="Resumen de deuda"
+            title="Saldo pendiente"
+            subtitle="Las deudas desaparecen automaticamente de la lista activa al llegar a 0."
+            collapsed={isSectionCollapsed('deudas-resumen')}
+            onToggle={() => toggleSection('deudas-resumen')}
+            emphasis
+          >
             <div className="status-grid">
               <div>
                 <span>Deuda total</span>
@@ -3539,7 +3607,7 @@ function App() {
                 <strong>{completedDebts.length}</strong>
               </div>
             </div>
-          </section>
+          </SectionFrame>
 
           {openComposer === 'deudas' && (
             <FullscreenComposer
@@ -3644,26 +3712,25 @@ function App() {
             </FullscreenComposer>
           )}
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Obligaciones amortizables</span>
-                <h2>Deudas activas</h2>
-              </div>
-              <div className="panel-header-actions">
-                <p>{activeDebts.length} activa(s)</p>
-                <button
-                  className="action-trigger"
-                  type="button"
-                  onClick={() => {
-                    resetDebtForm()
-                    openComposerForView('deudas')
-                  }}
-                >
-                  Registrar deuda
-                </button>
-              </div>
-            </div>
+          <SectionFrame
+            label="Obligaciones amortizables"
+            title="Deudas activas"
+            subtitle={`${activeDebts.length} activa(s)`}
+            collapsed={isSectionCollapsed('deudas-activas')}
+            onToggle={() => toggleSection('deudas-activas')}
+            actions={
+              <button
+                className="action-trigger"
+                type="button"
+                onClick={() => {
+                  resetDebtForm()
+                  openComposerForView('deudas')
+                }}
+              >
+                Registrar deuda
+              </button>
+            }
+          >
             <div className="debt-stack">
               {activeDebts.map((debt) => {
                 const progress = Math.round(
@@ -3793,16 +3860,15 @@ function App() {
                 </p>
               )}
             </div>
-          </section>
+          </SectionFrame>
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Historial</span>
-                <h2>Deudas pagadas</h2>
-              </div>
-              <p>{completedDebts.length} saldada(s)</p>
-            </div>
+          <SectionFrame
+            label="Historial"
+            title="Deudas pagadas"
+            subtitle={`${completedDebts.length} saldada(s)`}
+            collapsed={isSectionCollapsed('deudas-pagadas')}
+            onToggle={() => toggleSection('deudas-pagadas')}
+          >
             <div className="debt-stack">
               {completedDebts.map((debt) => {
                 const payments = debtPaymentHistory[debt.id] ?? []
@@ -3855,7 +3921,7 @@ function App() {
                 <p className="empty-copy">Aun no tienes deudas saldadas en el historial.</p>
               )}
             </div>
-          </section>
+          </SectionFrame>
         </div>
 
         <aside className="secondary-column">
@@ -3881,14 +3947,18 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
-          <section className="panel banking-panel emphasis">
-            <span className="micro-label">Persistencia</span>
-            <h2>Estado de sincronizacion</h2>
-            <p>
-              {supabaseConfigured
+          <SectionFrame
+            label="Persistencia"
+            title="Estado de sincronizacion"
+            subtitle={
+              supabaseConfigured
                 ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
-                : 'Supabase aun no esta configurado. La app opera en modo local.'}
-            </p>
+                : 'Supabase aun no esta configurado. La app opera en modo local.'
+            }
+            collapsed={isSectionCollapsed('config-sync')}
+            onToggle={() => toggleSection('config-sync')}
+            emphasis
+          >
             <div className="status-grid">
               <div>
                 <span>Origen</span>
@@ -3900,15 +3970,14 @@ function App() {
               </div>
             </div>
             {syncError && <p className="movement-detail">{syncError}</p>}
-          </section>
+          </SectionFrame>
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Categorias</span>
-                <h2>Gestion de categorias</h2>
-              </div>
-            </div>
+          <SectionFrame
+            label="Categorias"
+            title="Gestion de categorias"
+            collapsed={isSectionCollapsed('config-categorias')}
+            onToggle={() => toggleSection('config-categorias')}
+          >
             <form className="bank-form inline-form" onSubmit={handleAddCategory}>
               <label>
                 Nueva categoria
@@ -3932,15 +4001,14 @@ function App() {
                 </div>
               ))}
             </div>
-          </section>
+          </SectionFrame>
 
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">IA</span>
-                <h2>Reglas de aprendizaje</h2>
-              </div>
-            </div>
+          <SectionFrame
+            label="IA"
+            title="Reglas de aprendizaje"
+            collapsed={isSectionCollapsed('config-reglas')}
+            onToggle={() => toggleSection('config-reglas')}
+          >
             <div className="settings-chip-grid">
               {state.learningRules.map((rule) => (
                 <div key={rule.keyword} className="settings-chip">
@@ -3960,37 +4028,36 @@ function App() {
                 <p className="empty-copy">Todavia no hay reglas aprendidas por correcciones manuales.</p>
               )}
             </div>
-          </section>
+          </SectionFrame>
 
           {isAdminUser && (
-            <section className="panel banking-panel">
-              <div className="panel-header">
-                <div>
-                  <span className="micro-label">Administrador</span>
-                  <h2>Gestion de usuarios</h2>
-                </div>
-                <div className="panel-header-actions">
-                  <p>{managedUsers.length} usuario(s)</p>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => {
-                      setUsersFeedback(null)
-                      setShowUserAdminForm(true)
-                      setUserAdminForm({
-                        username: '',
-                        cedula: '',
-                        nombre: '',
-                        password: '',
-                        typeuser: 'user',
-                        editingUsername: '',
-                      })
-                    }}
-                  >
-                    Nuevo usuario
-                  </button>
-                </div>
-              </div>
+            <SectionFrame
+              label="Administrador"
+              title="Gestion de usuarios"
+              subtitle={`${managedUsers.length} usuario(s)`}
+              collapsed={isSectionCollapsed('config-usuarios')}
+              onToggle={() => toggleSection('config-usuarios')}
+              actions={
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setUsersFeedback(null)
+                    setShowUserAdminForm(true)
+                    setUserAdminForm({
+                      username: '',
+                      cedula: '',
+                      nombre: '',
+                      password: '',
+                      typeuser: 'user',
+                      editingUsername: '',
+                    })
+                  }}
+                >
+                  Nuevo usuario
+                </button>
+              }
+            >
               {showUserAdminForm && (
               <form className="bank-form user-admin-form" onSubmit={handleSubmitManagedUser}>
                 <div className="form-grid three">
@@ -4103,18 +4170,17 @@ function App() {
                   <p className="empty-copy">Todavia no hay usuarios registrados en el panel.</p>
                 )}
               </div>
-            </section>
+            </SectionFrame>
           )}
         </div>
 
         <aside className="secondary-column">
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Bolsillos</span>
-                <h2>Etiquetas de tipos de bolsillo</h2>
-              </div>
-            </div>
+          <SectionFrame
+            label="Bolsillos"
+            title="Etiquetas de tipos de bolsillo"
+            collapsed={isSectionCollapsed('config-pocket-labels')}
+            onToggle={() => toggleSection('config-pocket-labels')}
+          >
             <form className="bank-form">
               <div className="settings-group">
                 <p className="movement-detail">
@@ -4172,7 +4238,7 @@ function App() {
                 </div>
               </div>
             </form>
-          </section>
+          </SectionFrame>
         </aside>
       </section>
     )
@@ -4415,7 +4481,7 @@ function App() {
         >
           <span className="mobile-menu-trigger-copy">
             <strong>{viewLabels[activeView]}</strong>
-            <span>Menu y acciones</span>
+            <span>Navegacion y accesos</span>
           </span>
           <span className={isMobileMenuOpen ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
             <LuMenu />
@@ -4455,12 +4521,12 @@ function App() {
             <button
               type="button"
               className="mobile-menu-section-toggle"
-              onClick={() => toggleMobileMenuSection('acciones')}
+              onClick={() => toggleMobileMenuSection('atajos')}
             >
-              <span>Acciones</span>
-              <span>{mobileMenuSection === 'acciones' ? '−' : '+'}</span>
+              <span>Componentes clave</span>
+              <span>{mobileMenuSection === 'atajos' ? '−' : '+'}</span>
             </button>
-            {mobileMenuSection === 'acciones' && (
+            {mobileMenuSection === 'atajos' && (
               <div className="mobile-menu-actions">
                 <button type="button" className="action-trigger" onClick={openPrimaryActionForCurrentView}>
                   {activeView === 'movimientos'
@@ -4475,6 +4541,12 @@ function App() {
                 </button>
                 <button type="button" className="secondary-button" onClick={() => jumpToView('resumen')}>
                   Ver resumen consolidado
+                </button>
+                <button type="button" className="secondary-button" onClick={() => jumpToView('bolsillos')}>
+                  Abrir bolsillos
+                </button>
+                <button type="button" className="secondary-button" onClick={() => jumpToView('programacion')}>
+                  Ver obligaciones
                 </button>
               </div>
             )}
