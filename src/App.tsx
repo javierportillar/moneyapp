@@ -298,6 +298,7 @@ function App() {
     typeuser: 'user' as 'admin' | 'user',
     editingUsername: '',
   })
+  const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'configuracion']
 
   const suggestion = useMemo(
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
@@ -2025,21 +2026,6 @@ function App() {
           </article>
         </section>
 
-        <section className="account-strip">
-          {state.pockets.map((pocket) => (
-            <article key={pocket.id} className="account-card">
-              <div className="account-card-top">
-                <span className="icon-badge" style={{ background: pocket.color }}>
-                  {pocket.icon}
-                </span>
-                <span>{getPocketTypeLabel(pocket.type)}</span>
-              </div>
-              <strong>{pocket.name}</strong>
-              <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
-            </article>
-          ))}
-        </section>
-
         <section className="analytics-grid">
           <article className="panel banking-panel analytics-panel">
             <div className="panel-header">
@@ -2268,27 +2254,28 @@ function App() {
 
         <section className="dashboard-grid">
           <div className="primary-column">
-            <section className="panel banking-panel">
-              <div className="panel-header">
+            <section className="panel banking-panel emphasis">
+              <span className="micro-label">Supervisor mensual</span>
+              <h2>Estado operativo</h2>
+              <p>{coachingMessage}</p>
+              <div className="status-grid">
                 <div>
-                  <span className="micro-label">Centro transaccional</span>
-                  <h2>{moduleLabels[activeModule]}</h2>
+                  <span>Pendientes</span>
+                  <strong>{fixedStatus.pending.length}</strong>
                 </div>
-                <p>{getModuleSummary(activeModule)}</p>
+                <div>
+                  <span>Pagados</span>
+                  <strong>{fixedStatus.paid.length}</strong>
+                </div>
               </div>
-              <div className="module-segmented">
-                {(Object.keys(moduleLabels) as ModuleKey[]).map((module) => (
-                  <button
-                    key={module}
-                    type="button"
-                    className={module === activeModule ? 'segment active' : 'segment'}
-                    onClick={() => setActiveModule(module)}
-                  >
-                    {moduleLabels[module]}
-                  </button>
+              <div className="review-list">
+                {fixedStatus.review.slice(0, 3).map((item) => (
+                  <div key={item.id} className="review-chip">
+                    <span>{item.title}</span>
+                    <strong>Confirmar dia {item.confirmationDay}</strong>
+                  </div>
                 ))}
               </div>
-              {renderActiveForm()}
             </section>
 
             <section className="panel banking-panel">
@@ -2319,29 +2306,51 @@ function App() {
                 ))}
               </div>
             </section>
+
+            <section className="panel banking-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="micro-label">Centro transaccional</span>
+                  <h2>{moduleLabels[activeModule]}</h2>
+                </div>
+                <p>{getModuleSummary(activeModule)}</p>
+              </div>
+              <div className="module-segmented">
+                {(Object.keys(moduleLabels) as ModuleKey[]).map((module) => (
+                  <button
+                    key={module}
+                    type="button"
+                    className={module === activeModule ? 'segment active' : 'segment'}
+                    onClick={() => setActiveModule(module)}
+                  >
+                    {moduleLabels[module]}
+                  </button>
+                ))}
+              </div>
+              {renderActiveForm()}
+            </section>
           </div>
 
           <aside className="secondary-column">
-            <section className="panel banking-panel emphasis">
-              <span className="micro-label">Supervisor mensual</span>
-              <h2>Estado operativo</h2>
-              <p>{coachingMessage}</p>
-              <div className="status-grid">
+            <section className="panel banking-panel">
+              <div className="panel-header">
                 <div>
-                  <span>Pendientes</span>
-                  <strong>{fixedStatus.pending.length}</strong>
-                </div>
-                <div>
-                  <span>Pagados</span>
-                  <strong>{fixedStatus.paid.length}</strong>
+                  <span className="micro-label">Bolsillos</span>
+                  <h2>Saldos por bolsillo</h2>
                 </div>
               </div>
-              <div className="review-list">
-                {fixedStatus.review.slice(0, 3).map((item) => (
-                  <div key={item.id} className="review-chip">
-                    <span>{item.title}</span>
-                    <strong>Confirmar dia {item.confirmationDay}</strong>
-                  </div>
+              <div className="account-strip">
+                {state.pockets.map((pocket) => (
+                  <article key={pocket.id} className="account-card">
+                    <div className="account-card-top">
+                      <span className="icon-badge" style={{ background: pocket.color }}>
+                        {pocket.icon}
+                      </span>
+                      <span>{getPocketTypeLabel(pocket.type)}</span>
+                    </div>
+                    <strong>{pocket.name}</strong>
+                    <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
+                  </article>
                 ))}
               </div>
             </section>
@@ -2373,6 +2382,36 @@ function App() {
       return (
         <section className="dashboard-grid">
           <div className="primary-column">
+            <section className="panel banking-panel emphasis">
+              <span className="micro-label">Resumen operativo</span>
+              <h2>Prioridad del mes</h2>
+              <p>
+                {fixedStatus.overdue.length > 0
+                  ? `Tienes ${fixedStatus.overdue.length} obligacion(es) vencida(s). Conviene confirmar pagos antes de mover saldo a otros bolsillos.`
+                  : fixedStatus.pending.length > 0
+                    ? `Aun quedan ${fixedStatus.pending.length} obligacion(es) por ejecutar o confirmar en ${currentMonthKey}.`
+                    : 'Todas las obligaciones activas de este mes ya fueron confirmadas.'}
+              </p>
+              <div className="status-grid obligation-metrics">
+                <div>
+                  <span>Vencidas</span>
+                  <strong>{fixedStatus.overdue.length}</strong>
+                </div>
+                <div>
+                  <span>Revision</span>
+                  <strong>{fixedStatus.review.length}</strong>
+                </div>
+                <div>
+                  <span>Pagadas</span>
+                  <strong>{fixedStatus.paid.length}</strong>
+                </div>
+                <div>
+                  <span>Pausadas</span>
+                  <strong>{fixedStatus.paused.length}</strong>
+                </div>
+              </div>
+            </section>
+
             <section className="panel banking-panel">
               <div className="panel-header">
                 <div>
@@ -2518,6 +2557,54 @@ function App() {
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
+                <span className="micro-label">Detalle</span>
+                <h2>{selectedPocket.name}</h2>
+              </div>
+              <button className="text-link" type="button" onClick={() => jumpToView('movimientos')}>
+                Ir a movimientos
+              </button>
+            </div>
+            <div className="pocket-summary-grid">
+              <div className="summary-box">
+                <span>Saldo actual</span>
+                <strong>{money.format(pocketBalances[selectedPocket.id] ?? 0)}</strong>
+              </div>
+              <div className="summary-box">
+                <span>Tipo</span>
+                <strong>{getPocketTypeLabel(selectedPocket.type)}</strong>
+              </div>
+              <div className="summary-box accent">
+                <span>Identidad</span>
+                <strong>
+                  <span className="icon-badge inline" style={{ background: selectedPocket.color }}>
+                    {selectedPocket.icon}
+                  </span>
+                  {selectedPocket.name}
+                </strong>
+              </div>
+            </div>
+            <div className="ledger">
+              {selectedPocketActivity.slice(0, 6).map((item) => (
+                <article key={item.kind + item.id} className="ledger-row">
+                  <div className={`ledger-icon ${item.kind}`}></div>
+                  <div className="ledger-copy">
+                    <strong>{item.title}</strong>
+                    <p>
+                      {item.date} · {item.meta}
+                    </p>
+                  </div>
+                  <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+                    {item.amount >= 0 ? '+' : '-'}
+                    {money.format(Math.abs(item.amount))}
+                  </strong>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel banking-panel">
+            <div className="panel-header">
+              <div>
                 <span className="micro-label">Mapa de bolsillos</span>
                 <h2>Tus cuentas internas</h2>
               </div>
@@ -2560,54 +2647,6 @@ function App() {
                   </div>
                   <strong>{pocket.name}</strong>
                   <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Detalle</span>
-                <h2>{selectedPocket.name}</h2>
-              </div>
-              <button className="text-link" type="button" onClick={() => jumpToView('movimientos')}>
-                Ir a movimientos
-              </button>
-            </div>
-            <div className="pocket-summary-grid">
-              <div className="summary-box">
-                <span>Saldo actual</span>
-                <strong>{money.format(pocketBalances[selectedPocket.id] ?? 0)}</strong>
-              </div>
-              <div className="summary-box">
-                <span>Tipo</span>
-                <strong>{getPocketTypeLabel(selectedPocket.type)}</strong>
-              </div>
-              <div className="summary-box accent">
-                <span>Identidad</span>
-                <strong>
-                  <span className="icon-badge inline" style={{ background: selectedPocket.color }}>
-                    {selectedPocket.icon}
-                  </span>
-                  {selectedPocket.name}
-                </strong>
-              </div>
-            </div>
-            <div className="ledger">
-              {selectedPocketActivity.slice(0, 6).map((item) => (
-                <article key={item.kind + item.id} className="ledger-row">
-                  <div className={`ledger-icon ${item.kind}`}></div>
-                  <div className="ledger-copy">
-                    <strong>{item.title}</strong>
-                    <p>
-                      {item.date} · {item.meta}
-                    </p>
-                  </div>
-                  <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                    {item.amount >= 0 ? '+' : '-'}
-                    {money.format(Math.abs(item.amount))}
-                  </strong>
                 </article>
               ))}
             </div>
@@ -3257,33 +3296,19 @@ function App() {
           </div>
 
           <aside className="secondary-column">
-            <section className="panel banking-panel emphasis">
-              <span className="micro-label">Resumen operativo</span>
-              <h2>Prioridad del mes</h2>
-              <p>
-                {fixedStatus.overdue.length > 0
-                  ? `Tienes ${fixedStatus.overdue.length} obligacion(es) vencida(s). Conviene confirmar pagos antes de mover saldo a otros bolsillos.`
-                  : fixedStatus.pending.length > 0
-                    ? `Aun quedan ${fixedStatus.pending.length} obligacion(es) por ejecutar o confirmar en ${currentMonthKey}.`
-                    : 'Todas las obligaciones activas de este mes ya fueron confirmadas.'}
-              </p>
-              <div className="status-grid obligation-metrics">
-                <div>
-                  <span>Vencidas</span>
-                  <strong>{fixedStatus.overdue.length}</strong>
-                </div>
-                <div>
-                  <span>Revision</span>
-                  <strong>{fixedStatus.review.length}</strong>
-                </div>
-                <div>
-                  <span>Pagadas</span>
-                  <strong>{fixedStatus.paid.length}</strong>
-                </div>
-                <div>
-                  <span>Pausadas</span>
-                  <strong>{fixedStatus.paused.length}</strong>
-                </div>
+            <section className="panel banking-panel">
+              <span className="micro-label">Agenda</span>
+              <h2>Siguiente bloque</h2>
+              <div className="review-list">
+                {obligationSummary.nextDeadlines.slice(0, 3).map((item) => (
+                  <div key={item.id} className="review-chip">
+                    <span>{item.title}</span>
+                    <strong>Dia {item.dueDay}</strong>
+                  </div>
+                ))}
+                {obligationSummary.nextDeadlines.length === 0 && (
+                  <p className="empty-copy">No hay pagos proximos por atender.</p>
+                )}
               </div>
             </section>
           </aside>
@@ -3296,6 +3321,30 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          <section className="panel banking-panel emphasis">
+            <span className="micro-label">Resumen de deuda</span>
+            <h2>Saldo pendiente</h2>
+            <p>Las deudas desaparecen automaticamente de la lista activa al llegar a 0.</p>
+            <div className="status-grid">
+              <div>
+                <span>Deuda total</span>
+                <strong>{money.format(totals.pendingDebt)}</strong>
+              </div>
+              <div>
+                <span>Cuotas del mes</span>
+                <strong>{money.format(monthlyDebtCommitment)}</strong>
+              </div>
+              <div>
+                <span>Activas</span>
+                <strong>{activeDebts.length}</strong>
+              </div>
+              <div>
+                <span>Saldadas</span>
+                <strong>{completedDebts.length}</strong>
+              </div>
+            </div>
+          </section>
+
           {openComposer === 'deudas' && (
             <FullscreenComposer
               isOpen={openComposer === 'deudas'}
@@ -3614,27 +3663,17 @@ function App() {
         </div>
 
         <aside className="secondary-column">
-          <section className="panel banking-panel emphasis">
-            <span className="micro-label">Resumen de deuda</span>
-            <h2>Saldo pendiente</h2>
-            <p>Las deudas desaparecen automaticamente de la lista activa al llegar a 0.</p>
-            <div className="status-grid">
-              <div>
-                <span>Deuda total</span>
-                <strong>{money.format(totals.pendingDebt)}</strong>
-              </div>
-              <div>
-                <span>Cuotas del mes</span>
-                <strong>{money.format(monthlyDebtCommitment)}</strong>
-              </div>
-              <div>
-                <span>Activas</span>
-                <strong>{activeDebts.length}</strong>
-              </div>
-              <div>
-                <span>Saldadas</span>
-                <strong>{completedDebts.length}</strong>
-              </div>
+          <section className="panel banking-panel">
+            <span className="micro-label">Atencion inmediata</span>
+            <h2>Prioridad de cobro</h2>
+            <div className="review-list">
+              {activeDebts.slice(0, 3).map((debt) => (
+                <div key={debt.id} className="review-chip">
+                  <span>{debt.title}</span>
+                  <strong>{money.format(debt.remainingAmount)}</strong>
+                </div>
+              ))}
+              {activeDebts.length === 0 && <p className="empty-copy">No hay deudas activas por revisar.</p>}
             </div>
           </section>
         </aside>
@@ -3646,6 +3685,27 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          <section className="panel banking-panel emphasis">
+            <span className="micro-label">Persistencia</span>
+            <h2>Estado de sincronizacion</h2>
+            <p>
+              {supabaseConfigured
+                ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
+                : 'Supabase aun no esta configurado. La app opera en modo local.'}
+            </p>
+            <div className="status-grid">
+              <div>
+                <span>Origen</span>
+                <strong>{syncSource}</strong>
+              </div>
+              <div>
+                <span>Ultimo guardado</span>
+                <strong>{lastSyncedAt ? lastSyncedAt.slice(0, 16).replace('T', ' ') : 'Pendiente'}</strong>
+              </div>
+            </div>
+            {syncError && <p className="movement-detail">{syncError}</p>}
+          </section>
+
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
@@ -3852,27 +3912,6 @@ function App() {
         </div>
 
         <aside className="secondary-column">
-          <section className="panel banking-panel emphasis">
-            <span className="micro-label">Persistencia</span>
-            <h2>Estado de sincronizacion</h2>
-            <p>
-              {supabaseConfigured
-                ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
-                : 'Supabase aun no esta configurado. La app opera en modo local.'}
-            </p>
-            <div className="status-grid">
-              <div>
-                <span>Origen</span>
-                <strong>{syncSource}</strong>
-              </div>
-              <div>
-                <span>Ultimo guardado</span>
-                <strong>{lastSyncedAt ? lastSyncedAt.slice(0, 16).replace('T', ' ') : 'Pendiente'}</strong>
-              </div>
-            </div>
-            {syncError && <p className="movement-detail">{syncError}</p>}
-          </section>
-
           <section className="panel banking-panel">
             <div className="panel-header">
               <div>
@@ -4086,7 +4125,7 @@ function App() {
         <div className="sidebar-brand-row">
           <div className="brand">
             <div className="brand-mark">F</div>
-            <div>
+            <div className="brand-copy">
               <strong>MoneyApp</strong>
               <p>Control financiero</p>
             </div>
@@ -4107,14 +4146,17 @@ function App() {
         )}
 
         <nav className="sidebar-nav desktop-nav">
-          {(Object.keys(viewLabels) as ViewKey[]).map((view) => (
+          {orderedViews.map((view) => (
             <button
               key={view}
               className={view === activeView ? 'nav-item active' : 'nav-item'}
               type="button"
               onClick={() => setActiveView(view)}
             >
-              {viewLabels[view]}
+              <span className="nav-item-icon" aria-hidden="true">
+                {getViewIcon(view)}
+              </span>
+              <span className="nav-item-label">{viewLabels[view]}</span>
             </button>
           ))}
         </nav>
@@ -4136,7 +4178,7 @@ function App() {
 
       <section className="workspace">
         <header className="topbar">
-          <div>
+          <div className="topbar-copy">
             <p className="eyebrow">Panel financiero</p>
             <h1>{viewLabels[activeView]}</h1>
             <p className="view-description">{viewDescription}</p>
@@ -4162,7 +4204,7 @@ function App() {
       </section>
 
       <nav className="mobile-dock">
-        {(Object.keys(viewLabels) as ViewKey[]).map((view) => (
+        {orderedViews.map((view) => (
           <button
             key={view}
             type="button"

@@ -1,6 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
 :root {
   font-family:
-    Inter,
+    'Manrope',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -24,6 +26,19 @@
   --border-soft: rgba(123, 139, 163, 0.14);
   --panel: rgba(255, 255, 255, 0.82);
   --shadow: 0 24px 60px rgba(20, 24, 36, 0.08);
+  --bg-base: #f3efe6;
+  --bg-soft: #fbf8f2;
+  --ink-strong: #18212f;
+  --ink-soft: #5f6778;
+  --line-strong: rgba(70, 79, 94, 0.16);
+  --line-soft: rgba(70, 79, 94, 0.09);
+  --panel-strong: rgba(255, 252, 246, 0.9);
+  --panel-soft: rgba(255, 255, 255, 0.72);
+  --accent: #0d5c63;
+  --accent-strong: #0d3b66;
+  --accent-warm: #c96c3a;
+  --success: #1d7a5d;
+  --danger: #c7503f;
 }
 
 * {
@@ -37,12 +52,17 @@ html {
 body {
   margin: 0;
   min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(13, 92, 99, 0.12), transparent 24%),
+    radial-gradient(circle at top right, rgba(201, 108, 58, 0.13), transparent 26%),
+    linear-gradient(180deg, #f8f4ec 0%, #f2ede3 48%, #ebe6dd 100%);
 }
 
 body,
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -57,4 +77,20 @@ a {
 
 #root {
   min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4,
+.brand strong,
+.portfolio-head strong,
+.obligation-hero-card h3 {
+  font-family:
+    'Space Grotesk',
+    'Manrope',
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: -0.03em;
 }
