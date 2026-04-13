@@ -1,4 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  LuArrowLeftRight,
+  LuCircleDollarSign,
+  LuEye,
+  LuEyeOff,
+  LuLayoutDashboard,
+  LuMenu,
+  LuPencil,
+  LuPiggyBank,
+  LuSettings2,
+  LuWallet,
+  LuX,
+} from 'react-icons/lu'
 import './App.css'
 import { FullscreenComposer } from './components/FullscreenComposer'
 import {
@@ -123,12 +136,12 @@ function getDefaultIcon(type: PocketType) {
 }
 
 function getViewIcon(view: ViewKey) {
-  if (view === 'resumen') return '◫'
-  if (view === 'bolsillos') return '◉'
-  if (view === 'movimientos') return '↕'
-  if (view === 'programacion') return '◷'
-  if (view === 'deudas') return '¤'
-  return '⚙'
+  if (view === 'resumen') return <LuLayoutDashboard />
+  if (view === 'bolsillos') return <LuWallet />
+  if (view === 'movimientos') return <LuArrowLeftRight />
+  if (view === 'programacion') return <LuPiggyBank />
+  if (view === 'deudas') return <LuCircleDollarSign />
+  return <LuSettings2 />
 }
 
 function hydrateState(raw: AppState) {
@@ -165,7 +178,55 @@ function hydrateState(raw: AppState) {
   }
 }
 
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false)
+
+  return (
+    <span
+      className="info-tip"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onClick={(event) => {
+        event.stopPropagation()
+        setShow((current) => !current)
+      }}
+    >
+      <i className="info-tip-icon">i</i>
+      {show && <span className="info-tip-bubble">{text}</span>}
+    </span>
+  )
+}
+
+function MetricLabel({ label, info }: { label: string; info?: string }) {
+  return (
+    <span className="metric-label">
+      {label}
+      {info ? <InfoTip text={info} /> : null}
+    </span>
+  )
+}
+
+function TitleWithInfo({
+  title,
+  info,
+  level = 'h2',
+}: {
+  title: string
+  info?: string
+  level?: 'h2' | 'h3'
+}) {
+  const Tag = level
+
+  return (
+    <div className="title-with-tip">
+      <Tag>{title}</Tag>
+      {info ? <InfoTip text={info} /> : null}
+    </div>
+  )
+}
+
 function App() {
+  const [isConsolidatedOpen, setIsConsolidatedOpen] = useState(window.innerWidth > 820)
   const now = new Date()
   const today = formatDateISO(now)
   const currentMonthKey = today.slice(0, 7)
@@ -290,6 +351,8 @@ function App() {
   const [usersFeedback, setUsersFeedback] = useState<string | null>(null)
   const [showUserAdminForm, setShowUserAdminForm] = useState(false)
   const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [mobileMenuSection, setMobileMenuSection] = useState<'navegacion' | 'acciones' | 'contexto'>('navegacion')
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
     cedula: '',
@@ -299,6 +362,18 @@ function App() {
     editingUsername: '',
   })
   const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'configuracion']
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsConsolidatedOpen(window.innerWidth > 820)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false)
+  }, [activeView])
 
   const suggestion = useMemo(
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
@@ -429,6 +504,13 @@ function App() {
     const previousIncomes = previousMonthIncomes.reduce((sum, income) => sum + income.amount, 0)
     const pendingFixed = fixedStatus.pending.reduce((sum, item) => sum + item.amount, 0)
     const pendingDebt = activeDebts.reduce((sum, debt) => sum + debt.remainingAmount, 0)
+    const carriedBalance =
+      state.incomes
+        .filter((income) => income.date.slice(0, 7) < currentMonthKey)
+        .reduce((sum, income) => sum + income.amount, 0) -
+      state.expenses
+        .filter((expense) => expense.date.slice(0, 7) < currentMonthKey)
+        .reduce((sum, expense) => sum + expense.amount, 0)
 
     return {
       pocketBalance,
@@ -440,8 +522,21 @@ function App() {
       pendingDebt,
       netFlow: totalIncomes - totalExpenses,
       debtToIncomeRatio: totalIncomes > 0 ? pendingDebt / totalIncomes : 0,
+      carriedBalance,
+      totalExplainedBalance: pocketBalance,
     }
-  }, [activeDebts, fixedStatus.pending, monthExpenses, monthIncomes, pocketBalances, previousMonthExpenses, previousMonthIncomes])
+  }, [
+    activeDebts,
+    currentMonthKey,
+    fixedStatus.pending,
+    monthExpenses,
+    monthIncomes,
+    pocketBalances,
+    previousMonthExpenses,
+    previousMonthIncomes,
+    state.expenses,
+    state.incomes,
+  ])
 
   const topCategories = useMemo(() => {
     const grouped = monthExpenses.reduce<Record<string, number>>((acc, expense) => {
@@ -718,6 +813,22 @@ function App() {
   const currentMonthClosed = state.monthClosures.some((item) => item.monthKey === currentMonthKey)
   const previousClosure = state.monthClosures.find((item) => item.monthKey === previousMonthKey)
 
+  const monthOverMonth = useMemo(() => {
+    const previousIncome = previousClosure?.income ?? totals.previousIncomes
+    const previousExpense = previousClosure?.expense ?? totals.previousExpenses
+    const previousNet = previousIncome - previousExpense
+    const currentNet = totals.netFlow
+    const netDelta = currentNet - previousNet
+
+    return {
+      previousIncome,
+      previousExpense,
+      previousNet,
+      currentNet,
+      netDelta,
+    }
+  }, [previousClosure?.expense, previousClosure?.income, totals.netFlow, totals.previousExpenses, totals.previousIncomes])
+
   const coachingMessage = useMemo(() => {
     if (fixedStatus.overdue.length > 0) {
       return `Hay ${fixedStatus.overdue.length} compromiso(s) vencido(s). Prioriza caja antes de mover saldo a metas.`
@@ -737,7 +848,42 @@ function App() {
 
   function jumpToView(view: ViewKey, module?: ModuleKey) {
     setActiveView(view)
+    setIsMobileMenuOpen(false)
     if (module) setActiveModule(module)
+  }
+
+  function toggleMobileMenuSection(section: 'navegacion' | 'acciones' | 'contexto') {
+    setMobileMenuSection((current) => (current === section ? 'navegacion' : section))
+  }
+
+  function openPrimaryActionForCurrentView() {
+    if (activeView === 'movimientos') {
+      resetExpenseForm()
+      resetIncomeForm()
+      resetTransferForm()
+      openComposerForView('movimientos', 'gasto')
+      return
+    }
+
+    if (activeView === 'bolsillos') {
+      resetPocketForm()
+      openComposerForView('bolsillos', 'bolsillos')
+      return
+    }
+
+    if (activeView === 'programacion') {
+      resetFixedForm()
+      openComposerForView('programacion', 'fijos')
+      return
+    }
+
+    if (activeView === 'deudas') {
+      resetDebtForm()
+      openComposerForView('deudas')
+      return
+    }
+
+    jumpToView('movimientos')
   }
 
   function openComposerForView(view: ComposerView, module?: ModuleKey) {
@@ -1987,21 +2133,44 @@ function App() {
               <div>
                 <span className="micro-label">Posicion consolidada</span>
                 <strong>{money.format(totals.pocketBalance)}</strong>
+                <p className="panel-subtitle">Total conciliado entre saldo arrastrado e impacto del mes actual.</p>
               </div>
               <small>{totals.netFlow >= 0 ? 'Flujo positivo' : 'Flujo negativo'}</small>
             </div>
-            <div className="portfolio-metrics">
-              <div>
-                <span>Ingresos</span>
-                <strong>{money.format(totals.totalIncomes)}</strong>
-              </div>
-              <div>
-                <span>Gastos</span>
-                <strong>{money.format(totals.totalExpenses)}</strong>
-              </div>
-              <div>
-                <span>Neto</span>
-                <strong>{money.format(totals.netFlow)}</strong>
+            <div className={`collapsible-content ${isConsolidatedOpen ? 'open' : ''}`}>
+              <div className="portfolio-metrics summary-reconciliation-grid">
+                <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
+                  <MetricLabel
+                    label="Ingresos del mes"
+                    info="Entradas registradas en el mes activo. No incluye traslados internos entre bolsillos."
+                  />
+                  <strong style={{ color: 'var(--success)' }}>{money.format(totals.totalIncomes)}</strong>
+                </div>
+                <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
+                  <MetricLabel
+                    label="Gastos del mes"
+                    info="Salidas registradas en el mes activo, incluyendo pagos de deudas y obligaciones."
+                  />
+                  <strong>{money.format(totals.totalExpenses)}</strong>
+                </div>
+                {totals.carriedBalance !== 0 && (
+                  <div className="reconciliation-row interactive" onClick={() => jumpToView('movimientos')}>
+                    <MetricLabel
+                      label="Saldo arrastrado"
+                      info="Saldo acumulado antes del mes actual. Si venías con dinero a favor o en contra, aquí se justifica la diferencia frente al total."
+                    />
+                    <strong className={totals.carriedBalance >= 0 ? 'value-positive' : 'value-negative'}>
+                      {money.format(totals.carriedBalance)}
+                    </strong>
+                  </div>
+                )}
+                <div className="reconciliation-row total-row">
+                  <MetricLabel
+                    label="Saldo total conciliado"
+                    info="Resultado real disponible: saldo arrastrado de meses anteriores más el flujo neto del mes actual. Debe coincidir con el total distribuido en tus bolsillos."
+                  />
+                  <strong style={{ fontSize: '1.1em' }}>{money.format(totals.totalExplainedBalance)}</strong>
+                </div>
               </div>
             </div>
           </article>
@@ -2031,13 +2200,16 @@ function App() {
             <div className="panel-header">
               <div>
                 <span className="micro-label">Flujo</span>
-                <h2>Lectura financiera</h2>
+                <TitleWithInfo
+                  title="Lectura financiera"
+                  info="Resumen rápido de cómo está respirando tu caja este mes: cuánto entra, cuánto sale y qué presión ejerce la deuda pendiente."
+                />
               </div>
             </div>
             <div className="flow-metric-list">
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Ingresos del mes</span>
+                  <MetricLabel label="Ingresos del mes" info="Todo lo que entró durante el mes activo." />
                   <strong>{money.format(totals.totalIncomes)}</strong>
                 </div>
                 <div className="flow-bar income">
@@ -2046,7 +2218,7 @@ function App() {
               </div>
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Gastos del mes</span>
+                  <MetricLabel label="Gastos del mes" info="Todo lo que salió durante el mes activo." />
                   <strong>{money.format(totals.totalExpenses)}</strong>
                 </div>
                 <div className="flow-bar expense">
@@ -2055,7 +2227,10 @@ function App() {
               </div>
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Deuda pendiente</span>
+                  <MetricLabel
+                    label="Deuda pendiente"
+                    info="Saldo restante por pagar de todas las deudas activas. No es una salida del mes, pero sí una presión futura sobre tu flujo."
+                  />
                   <strong>{money.format(totals.pendingDebt)}</strong>
                 </div>
                 <div className="flow-bar debt">
@@ -2069,7 +2244,10 @@ function App() {
             <div className="panel-header">
               <div>
                 <span className="micro-label">Categorias</span>
-                <h2>Distribucion del gasto</h2>
+                <TitleWithInfo
+                  title="Distribucion del gasto"
+                  info="Muestra en qué categorías se está concentrando el gasto del mes y qué porcentaje representa cada una sobre el total gastado."
+                />
               </div>
             </div>
             <div className="category-analytics">
@@ -2094,44 +2272,69 @@ function App() {
             <div className="panel-header">
               <div>
                 <span className="micro-label">Comparativo</span>
-                <h2>Mes contra mes</h2>
+                <TitleWithInfo
+                  title="Mes contra mes"
+                  info="Compara el mes actual con el anterior para ver si tus ingresos, gastos y resultado neto están mejorando o empeorando."
+                />
+                <p className="panel-subtitle">
+                  Tomas el mes actual y lo comparas contra {previousMonthKey} para entender si el flujo va mejor o peor.
+                </p>
               </div>
             </div>
             <div className="flow-metric-list">
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Ingresos {previousMonthKey}</span>
-                  <strong>{money.format(previousClosure?.income ?? totals.previousIncomes)}</strong>
+                  <MetricLabel
+                    label={`Ingresos ${previousMonthKey}`}
+                    info="Entradas del mes anterior. Si cerraste ese mes, toma el cierre; si no, usa el cálculo en vivo."
+                  />
+                  <strong>{money.format(monthOverMonth.previousIncome)}</strong>
                 </div>
                 <div className="flow-bar income">
                   <div
                     style={{
-                      width: `${((previousClosure?.income ?? totals.previousIncomes) / summaryAnalytics.maxFlowBase) * 100}%`,
+                      width: `${(monthOverMonth.previousIncome / summaryAnalytics.maxFlowBase) * 100}%`,
                     }}
                   />
                 </div>
               </div>
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Gastos {previousMonthKey}</span>
-                  <strong>{money.format(previousClosure?.expense ?? totals.previousExpenses)}</strong>
+                  <MetricLabel
+                    label={`Gastos ${previousMonthKey}`}
+                    info="Salidas del mes anterior. Sirve como base para comparar si este mes estás gastando más o menos."
+                  />
+                  <strong>{money.format(monthOverMonth.previousExpense)}</strong>
                 </div>
                 <div className="flow-bar expense">
                   <div
                     style={{
-                      width: `${((previousClosure?.expense ?? totals.previousExpenses) / summaryAnalytics.maxFlowBase) * 100}%`,
+                      width: `${(monthOverMonth.previousExpense / summaryAnalytics.maxFlowBase) * 100}%`,
                     }}
                   />
                 </div>
               </div>
               <div className="flow-metric">
                 <div className="flow-metric-head">
-                  <span>Ratio deuda / ingreso</span>
-                  <strong>{Math.round(totals.debtToIncomeRatio * 100)}%</strong>
+                  <MetricLabel
+                    label="Variacion del neto"
+                    info="Diferencia entre el resultado neto del mes actual y el del mes anterior. Positivo es mejora; negativo es deterioro."
+                  />
+                  <strong className={monthOverMonth.netDelta >= 0 ? 'value-positive' : 'value-negative'}>
+                    {monthOverMonth.netDelta >= 0 ? '+' : ''}
+                    {money.format(monthOverMonth.netDelta)}
+                  </strong>
                 </div>
                 <div className="flow-bar debt">
-                  <div style={{ width: `${Math.min(totals.debtToIncomeRatio * 100, 100)}%` }} />
+                  <div
+                    style={{
+                      width: `${Math.min((Math.abs(monthOverMonth.netDelta) / summaryAnalytics.maxFlowBase) * 100, 100)}%`,
+                    }}
+                  />
                 </div>
+                <p className="movement-detail">
+                  Neto actual {money.format(monthOverMonth.currentNet)} frente a neto previo {money.format(monthOverMonth.previousNet)}
+                </p>
               </div>
             </div>
           </article>
@@ -2642,7 +2845,7 @@ function App() {
                         startEditPocket(pocket.id)
                       }}
                     >
-                      ✎
+                      <LuPencil />
                     </button>
                   </div>
                   <strong>{pocket.name}</strong>
@@ -2880,7 +3083,7 @@ function App() {
                                 aria-label={`Editar movimiento ${item.title}`}
                                 onClick={() => startEditMovement(item.kind, item.id)}
                               >
-                                ✎
+                                <LuPencil />
                               </button>
                             )}
                             {item.deletable && (
@@ -3259,7 +3462,7 @@ function App() {
                             aria-label={`Editar obligacion ${item.title}`}
                             onClick={() => startEditFixedExpense(item.id)}
                           >
-                            ✎
+                            <LuPencil />
                           </button>
                         </div>
                         <div className="obligation-chip-row">
@@ -3486,7 +3689,7 @@ function App() {
                             aria-label={`Editar deuda ${debt.title}`}
                             onClick={() => startEditDebt(debt.id)}
                           >
-                            ✎
+                            <LuPencil />
                           </button>
                         </div>
                         <p>
@@ -3539,7 +3742,7 @@ function App() {
                             aria-label={`Cancelar ingreso de pago para ${debt.title}`}
                             onClick={() => setOpenDebtPaymentId(null)}
                           >
-                            ×
+                            <LuX />
                           </button>
                         </div>
                         <label>
@@ -3846,7 +4049,7 @@ function App() {
                         aria-label={showUserAdminPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                         title={showUserAdminPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                       >
-                        {showUserAdminPassword ? '🙈' : '👁'}
+                        {showUserAdminPassword ? <LuEyeOff /> : <LuEye />}
                       </button>
                     </div>
                   </label>
@@ -3894,7 +4097,7 @@ function App() {
                         aria-label={`Editar usuario ${managedUser.username}`}
                         onClick={() => startEditManagedUser(managedUser.username)}
                       >
-                        ✎
+                        <LuPencil />
                       </button>
                     </div>
                     <div className="managed-user-meta">
@@ -4014,7 +4217,9 @@ function App() {
       <main className="auth-shell">
         <section className="auth-panel">
           <div className="auth-brand">
-            <div className="brand-mark">F</div>
+            <div className="brand-mark">
+              <LuWallet />
+            </div>
             <div>
               <strong>MoneyApp</strong>
               <p>Acceso seguro a tu perfil financiero</p>
@@ -4071,7 +4276,7 @@ function App() {
                   aria-label={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                   title={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                 >
-                  {showAuthPassword ? '🙈' : '👁'}
+                  {showAuthPassword ? <LuEyeOff /> : <LuEye />}
                 </button>
               </div>
             </label>
@@ -4124,7 +4329,9 @@ function App() {
       <aside className="sidebar">
         <div className="sidebar-brand-row">
           <div className="brand">
-            <div className="brand-mark">F</div>
+            <div className="brand-mark">
+              <LuWallet />
+            </div>
             <div className="brand-copy">
               <strong>MoneyApp</strong>
               <p>Control financiero</p>
@@ -4151,7 +4358,7 @@ function App() {
               key={view}
               className={view === activeView ? 'nav-item active' : 'nav-item'}
               type="button"
-              onClick={() => setActiveView(view)}
+              onClick={() => jumpToView(view)}
             >
               <span className="nav-item-icon" aria-hidden="true">
                 {getViewIcon(view)}
@@ -4195,30 +4402,119 @@ function App() {
           </div>
         </header>
 
-        {activeView === 'resumen' && renderSummaryView()}
-        {activeView === 'bolsillos' && renderPocketsView()}
-        {activeView === 'movimientos' && renderMovementsView()}
-        {activeView === 'programacion' && renderProgrammingView()}
-        {activeView === 'deudas' && renderDebtsView()}
-        {activeView === 'configuracion' && renderSettingsView()}
+        <div className="view-stage" data-view={activeView}>
+          {activeView === 'resumen' && renderSummaryView()}
+          {activeView === 'bolsillos' && renderPocketsView()}
+          {activeView === 'movimientos' && renderMovementsView()}
+          {activeView === 'programacion' && renderProgrammingView()}
+          {activeView === 'deudas' && renderDebtsView()}
+          {activeView === 'configuracion' && renderSettingsView()}
+        </div>
       </section>
 
-      <nav className="mobile-dock">
-        {orderedViews.map((view) => (
-          <button
-            key={view}
-            type="button"
-            className={view === activeView ? 'mobile-dock-item active' : 'mobile-dock-item'}
-            onClick={() => setActiveView(view)}
-            aria-label={viewLabels[view]}
-          >
-            <span className="mobile-dock-icon" aria-hidden="true">
-              {getViewIcon(view)}
-            </span>
-            <span className="mobile-dock-label">{viewLabels[view]}</span>
-          </button>
-        ))}
-      </nav>
+      <div className="mobile-menu-shell">
+        <button
+          type="button"
+          className={isMobileMenuOpen ? 'mobile-menu-trigger active' : 'mobile-menu-trigger'}
+          onClick={() => setIsMobileMenuOpen((current) => !current)}
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="mobile-finance-menu"
+        >
+          <span className="mobile-menu-trigger-copy">
+            <strong>{viewLabels[activeView]}</strong>
+            <span>Menu y acciones</span>
+          </span>
+          <span className={isMobileMenuOpen ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
+            <LuMenu />
+          </span>
+        </button>
+
+        <div id="mobile-finance-menu" className={isMobileMenuOpen ? 'mobile-menu-sheet open' : 'mobile-menu-sheet'}>
+          <div className="mobile-menu-section">
+            <button
+              type="button"
+              className="mobile-menu-section-toggle"
+              onClick={() => toggleMobileMenuSection('navegacion')}
+            >
+              <span>Navegacion</span>
+              <span>{mobileMenuSection === 'navegacion' ? '−' : '+'}</span>
+            </button>
+            {mobileMenuSection === 'navegacion' && (
+              <div className="mobile-menu-grid">
+                {orderedViews.map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    className={view === activeView ? 'mobile-menu-item active' : 'mobile-menu-item'}
+                    onClick={() => jumpToView(view)}
+                  >
+                    <span className="mobile-menu-item-icon" aria-hidden="true">
+                      {getViewIcon(view)}
+                    </span>
+                    <span>{viewLabels[view]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mobile-menu-section">
+            <button
+              type="button"
+              className="mobile-menu-section-toggle"
+              onClick={() => toggleMobileMenuSection('acciones')}
+            >
+              <span>Acciones</span>
+              <span>{mobileMenuSection === 'acciones' ? '−' : '+'}</span>
+            </button>
+            {mobileMenuSection === 'acciones' && (
+              <div className="mobile-menu-actions">
+                <button type="button" className="action-trigger" onClick={openPrimaryActionForCurrentView}>
+                  {activeView === 'movimientos'
+                    ? 'Registrar movimiento'
+                    : activeView === 'bolsillos'
+                      ? 'Crear bolsillo'
+                      : activeView === 'programacion'
+                        ? 'Registrar obligacion'
+                        : activeView === 'deudas'
+                          ? 'Registrar deuda'
+                          : 'Ir a movimientos'}
+                </button>
+                <button type="button" className="secondary-button" onClick={() => jumpToView('resumen')}>
+                  Ver resumen consolidado
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mobile-menu-section">
+            <button
+              type="button"
+              className="mobile-menu-section-toggle"
+              onClick={() => toggleMobileMenuSection('contexto')}
+            >
+              <span>Contexto</span>
+              <span>{mobileMenuSection === 'contexto' ? '−' : '+'}</span>
+            </button>
+            {mobileMenuSection === 'contexto' && (
+              <div className="mobile-context-grid">
+                <article className="mobile-context-card">
+                  <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
+                  <strong>{money.format(totals.pocketBalance)}</strong>
+                </article>
+                <article className="mobile-context-card">
+                  <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
+                  <strong>{money.format(totals.pendingFixed)}</strong>
+                </article>
+                <article className="mobile-context-card">
+                  <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
+                  <strong>{money.format(totals.pendingDebt)}</strong>
+                </article>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </main>
   )
 }
