@@ -201,25 +201,6 @@ function MetricLabel({ label, info }: { label: string; info?: string }) {
   )
 }
 
-function TitleWithInfo({
-  title,
-  info,
-  level = 'h2',
-}: {
-  title: string
-  info?: string
-  level?: 'h2' | 'h3'
-}) {
-  const Tag = level
-
-  return (
-    <div className="title-with-tip">
-      <Tag>{title}</Tag>
-      {info ? <InfoTip text={info} /> : null}
-    </div>
-  )
-}
-
 function SectionFrame({
   label,
   title,
@@ -395,7 +376,6 @@ function App() {
   const [showUserAdminForm, setShowUserAdminForm] = useState(false)
   const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const [mobileMenuSection, setMobileMenuSection] = useState<'navegacion' | 'atajos' | 'contexto' | null>('navegacion')
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
@@ -732,30 +712,26 @@ function App() {
   }, [filteredActivity])
 
   const summaryDrilldown = useMemo(() => {
-    const previousMonths = Array.from(
-      new Set(
-        state.incomes
-          .map((item) => item.date.slice(0, 7))
-          .concat(state.expenses.map((item) => item.date.slice(0, 7)))
-          .filter((monthKey) => monthKey < currentMonthKey),
-      ),
-    )
-      .sort((a, b) => (a < b ? 1 : -1))
-      .map((monthKey) => {
-        const income = state.incomes
-          .filter((item) => item.date.startsWith(monthKey))
-          .reduce((sum, item) => sum + item.amount, 0)
-        const expense = state.expenses
-          .filter((item) => item.date.startsWith(monthKey))
-          .reduce((sum, item) => sum + item.amount, 0)
-
-        return {
-          monthKey,
-          income,
-          expense,
-          net: income - expense,
-        }
-      })
+    const previousMovements = [
+      ...state.incomes
+        .filter((item) => item.date.slice(0, 7) < currentMonthKey)
+        .map((income) => ({
+          id: `income-${income.id}`,
+          title: income.title,
+          date: income.date,
+          amount: income.amount,
+          meta: getPocketName(state.pockets, income.pocketId),
+        })),
+      ...state.expenses
+        .filter((item) => item.date.slice(0, 7) < currentMonthKey)
+        .map((expense) => ({
+          id: `expense-${expense.id}`,
+          title: expense.description,
+          date: expense.date,
+          amount: -expense.amount,
+          meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
+        })),
+    ].sort((a, b) => (a.date < b.date ? 1 : -1))
 
     return {
       ingresos: monthIncomes.map((income) => ({
@@ -772,7 +748,7 @@ function App() {
         amount: expense.amount,
         meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
       })),
-      saldoAnterior: previousMonths,
+      saldoAnterior: previousMovements,
     }
   }, [currentMonthKey, monthExpenses, monthIncomes, state.expenses, state.incomes, state.pockets])
 
@@ -920,10 +896,6 @@ function App() {
     if (module) setActiveModule(module)
   }
 
-  function toggleMobileMenuSection(section: 'navegacion' | 'atajos' | 'contexto') {
-    setMobileMenuSection((current) => (current === section ? null : section))
-  }
-
   function isSectionCollapsed(sectionId: string) {
     return collapsedSections[sectionId] ?? false
   }
@@ -933,36 +905,6 @@ function App() {
       ...current,
       [sectionId]: !current[sectionId],
     }))
-  }
-
-  function openPrimaryActionForCurrentView() {
-    if (activeView === 'movimientos') {
-      resetExpenseForm()
-      resetIncomeForm()
-      resetTransferForm()
-      openComposerForView('movimientos', 'gasto')
-      return
-    }
-
-    if (activeView === 'bolsillos') {
-      resetPocketForm()
-      openComposerForView('bolsillos', 'bolsillos')
-      return
-    }
-
-    if (activeView === 'programacion') {
-      resetFixedForm()
-      openComposerForView('programacion', 'fijos')
-      return
-    }
-
-    if (activeView === 'deudas') {
-      resetDebtForm()
-      openComposerForView('deudas')
-      return
-    }
-
-    jumpToView('movimientos')
   }
 
   function openMovementOrigin(kind: MovementKind, source?: string) {
@@ -2173,7 +2115,7 @@ function App() {
   function renderSummaryView() {
     return (
       <>
-        <section className="hero-grid">
+        <section className="hero-grid summary-hero-single">
           <article className="portfolio-card">
             <div className="portfolio-head">
               <div>
@@ -2217,7 +2159,7 @@ function App() {
               )}
               <div className="reconciliation-row total-row">
                 <MetricLabel
-                  label="Saldo total conciliado"
+                  label="Balance total"
                   info="Resultado real disponible: saldo arrastrado de meses anteriores más el flujo neto del mes actual. Debe coincidir con el total distribuido en tus bolsillos."
                 />
                 <strong style={{ fontSize: '1.1em' }}>{money.format(totals.totalExplainedBalance)}</strong>
@@ -2225,24 +2167,6 @@ function App() {
             </div>
           </article>
 
-          <article className="quick-stats">
-            <div className="quick-stat">
-              <span>Transferencias</span>
-              <strong>{monthTransfers.length}</strong>
-            </div>
-            <div className="quick-stat">
-              <span>Pagados</span>
-              <strong>{fixedStatus.paid.length}</strong>
-            </div>
-            <div className="quick-stat">
-              <span>Vencidos</span>
-              <strong>{fixedStatus.overdue.length}</strong>
-            </div>
-            <div className="quick-stat">
-              <span>Cierre mensual</span>
-              <strong>{currentMonthClosed ? 'Cerrado' : 'Abierto'}</strong>
-            </div>
-          </article>
         </section>
 
         {activeSummaryBreakdown && (
@@ -2293,14 +2217,14 @@ function App() {
               {activeSummaryBreakdown === 'saldoAnterior' && (
                 <>
                   {summaryDrilldown.saldoAnterior.map((item) => (
-                    <article key={item.monthKey} className="summary-detail-row">
+                    <article key={item.id} className="summary-detail-row">
                       <div>
-                        <strong>{item.monthKey}</strong>
-                        <p>Ingresos {money.format(item.income)} · Gastos {money.format(item.expense)}</p>
+                        <strong>{item.title}</strong>
+                        <p>{item.date} · {item.meta}</p>
                       </div>
-                      <strong className={item.net >= 0 ? 'value-positive' : 'value-negative'}>
-                        {item.net >= 0 ? '+' : ''}
-                        {money.format(item.net)}
+                      <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+                        {item.amount >= 0 ? '+' : '-'}
+                        {money.format(Math.abs(item.amount))}
                       </strong>
                     </article>
                   ))}
@@ -2314,16 +2238,13 @@ function App() {
         )}
 
         <section className="analytics-grid">
-          <article className="panel banking-panel analytics-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Flujo</span>
-                <TitleWithInfo
-                  title="Lectura financiera"
-                  info="Resumen rápido de cómo está respirando tu caja este mes: cuánto entra, cuánto sale y qué presión ejerce la deuda pendiente."
-                />
-              </div>
-            </div>
+          <SectionFrame
+            label="Flujo"
+            title="Lectura financiera"
+            subtitle="Resumen rápido de cómo está respirando tu caja este mes: cuánto entra, cuánto sale y qué presión ejerce la deuda pendiente."
+            collapsed={isSectionCollapsed('summary-lectura')}
+            onToggle={() => toggleSection('summary-lectura')}
+          >
             <div className="flow-metric-list">
               <div className="flow-metric">
                 <div className="flow-metric-head">
@@ -2356,49 +2277,15 @@ function App() {
                 </div>
               </div>
             </div>
-          </article>
+          </SectionFrame>
 
-          <article className="panel banking-panel analytics-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Categorias</span>
-                <TitleWithInfo
-                  title="Distribucion del gasto"
-                  info="Muestra en qué categorías se está concentrando el gasto del mes y qué porcentaje representa cada una sobre el total gastado."
-                />
-              </div>
-            </div>
-            <div className="category-analytics">
-              {summaryAnalytics.categoryBreakdown.map((item) => (
-                <div key={item.category} className="analytics-row">
-                  <div className="analytics-row-head">
-                    <span>{item.category}</span>
-                    <strong>{money.format(item.total)}</strong>
-                  </div>
-                  <div className="flow-bar neutral">
-                    <div style={{ width: `${item.ratio * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-              {summaryAnalytics.categoryBreakdown.length === 0 && (
-                <p className="empty-copy">Todavia no hay gasto suficiente para dibujar categorias.</p>
-              )}
-            </div>
-          </article>
-
-          <article className="panel banking-panel analytics-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Comparativo</span>
-                <TitleWithInfo
-                  title="Mes contra mes"
-                  info="Compara el mes actual con el anterior para ver si tus ingresos, gastos y resultado neto están mejorando o empeorando."
-                />
-                <p className="panel-subtitle">
-                  Tomas el mes actual y lo comparas contra {previousMonthKey} para entender si el flujo va mejor o peor.
-                </p>
-              </div>
-            </div>
+          <SectionFrame
+            label="Comparativo"
+            title="Mes contra mes"
+            subtitle={`Tomas el mes actual y lo comparas contra ${previousMonthKey} para entender si el flujo va mejor o peor.`}
+            collapsed={isSectionCollapsed('summary-mesmes')}
+            onToggle={() => toggleSection('summary-mesmes')}
+          >
             <div className="flow-metric-list">
               <div className="flow-metric">
                 <div className="flow-metric-head">
@@ -2455,15 +2342,14 @@ function App() {
                 </p>
               </div>
             </div>
-          </article>
+          </SectionFrame>
 
-          <article className="panel banking-panel analytics-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Bolsillos</span>
-                <h2>Distribucion del saldo</h2>
-              </div>
-            </div>
+          <SectionFrame
+            label="Bolsillos"
+            title="Distribucion del saldo"
+            collapsed={isSectionCollapsed('summary-distribucion-saldo')}
+            onToggle={() => toggleSection('summary-distribucion-saldo')}
+          >
             <div className="pocket-analytics">
               {summaryAnalytics.pocketBreakdown.map((item) => {
                 const maxPocketBase = Math.max(
@@ -2489,15 +2375,39 @@ function App() {
                 )
               })}
             </div>
-          </article>
+          </SectionFrame>
 
-          <article className="panel banking-panel analytics-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Deudas</span>
-                <h2>Amortizacion activa</h2>
-              </div>
+          <SectionFrame
+            label="Categorias"
+            title="Distribucion del gasto"
+            subtitle="Muestra en qué categorías se está concentrando el gasto del mes y qué porcentaje representa cada una sobre el total gastado."
+            collapsed={isSectionCollapsed('summary-distribucion-gasto')}
+            onToggle={() => toggleSection('summary-distribucion-gasto')}
+          >
+            <div className="category-analytics">
+              {summaryAnalytics.categoryBreakdown.map((item) => (
+                <div key={item.category} className="analytics-row">
+                  <div className="analytics-row-head">
+                    <span>{item.category}</span>
+                    <strong>{money.format(item.total)}</strong>
+                  </div>
+                  <div className="flow-bar neutral">
+                    <div style={{ width: `${item.ratio * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+              {summaryAnalytics.categoryBreakdown.length === 0 && (
+                <p className="empty-copy">Todavia no hay gasto suficiente para dibujar categorias.</p>
+              )}
             </div>
+          </SectionFrame>
+
+          <SectionFrame
+            label="Deudas"
+            title="Amortizacion activa"
+            collapsed={isSectionCollapsed('summary-amortizacion')}
+            onToggle={() => toggleSection('summary-amortizacion')}
+          >
             <div className="debt-analytics">
               {summaryAnalytics.debtBreakdown.map((debt) => (
                 <div key={debt.id} className="analytics-row">
@@ -2518,18 +2428,19 @@ function App() {
                 <p className="empty-copy">No hay deudas activas para analizar.</p>
               )}
             </div>
-          </article>
+          </SectionFrame>
 
-          <article className="panel banking-panel analytics-panel wide-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Tendencia</span>
-                <h2>Flujo diario del mes</h2>
-              </div>
+          <SectionFrame
+            label="Tendencia"
+            title="Flujo diario del mes"
+            collapsed={isSectionCollapsed('summary-flujo-diario')}
+            onToggle={() => toggleSection('summary-flujo-diario')}
+            actions={
               <button type="button" className="action-trigger ghost" onClick={handleCloseMonth}>
                 {currentMonthClosed ? 'Mes cerrado' : 'Cerrar mes'}
               </button>
-            </div>
+            }
+          >
             <div className="daily-trend-board">
               {summaryAnalytics.dailyTrend.map((item) => (
                 <div key={item.date} className="daily-trend-bar">
@@ -2543,15 +2454,14 @@ function App() {
                 </div>
               ))}
             </div>
-          </article>
+          </SectionFrame>
 
-          <article className="panel banking-panel analytics-panel wide-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Tendencia</span>
-                <h2>Ultimos seis meses</h2>
-              </div>
-            </div>
+          <SectionFrame
+            label="Tendencia"
+            title="Ultimos seis meses"
+            collapsed={isSectionCollapsed('summary-ultimos-meses')}
+            onToggle={() => toggleSection('summary-ultimos-meses')}
+          >
             <div className="monthly-trend-board">
               {summaryAnalytics.monthTrend.map((item) => (
                 <div key={item.monthKey} className="monthly-trend-row">
@@ -2570,7 +2480,7 @@ function App() {
                 </div>
               ))}
             </div>
-          </article>
+          </SectionFrame>
         </section>
 
         <section className="dashboard-grid">
@@ -2696,6 +2606,28 @@ function App() {
             </section>
           </aside>
         </section>
+
+        {auth.user && (
+          <section className="panel banking-panel summary-user-panel">
+            <div className="panel-header">
+              <div>
+                <span className="micro-label">Usuario</span>
+                <h2>Perfil activo</h2>
+              </div>
+            </div>
+            <div className="summary-user-card">
+              <div className="summary-user-copy">
+                <strong>Hola, {auth.user.nombre?.split(' ')[0] || auth.user.username}</strong>
+                <p>@{auth.user.username}</p>
+                <p>{auth.user.cedula}</p>
+                <span className="user-type-badge">{auth.user.typeuser ?? 'user'}</span>
+              </div>
+              <button type="button" className="sidebar-logout-btn" onClick={() => auth.signOut()}>
+                Cerrar sesion
+              </button>
+            </div>
+          </section>
+        )}
       </>
     )
   }
@@ -4393,25 +4325,11 @@ function App() {
             </div>
             <div className="brand-copy">
               <strong>MoneyApp</strong>
-              <p className="brand-subtitle">PANEL FINANCIERO</p>
+              <p className="brand-subtitle">
+                {auth.user ? `Hola, ${auth.user.nombre?.split(' ')[0] || auth.user.username}` : 'PANEL FINANCIERO'}
+              </p>
             </div>
           </div>
-          {auth.user && (
-            <section className="unified-user-panel">
-              <div className="unified-user-greeting">
-                <span className="micro-label">Bienvenido</span>
-                <strong>Hola, {auth.user.nombre?.split(' ')[0] || `@${auth.user.username}`}</strong>
-              </div>
-              <div className="unified-user-info">
-                <p>@{auth.user.username}</p>
-                <p>{auth.user.cedula}</p>
-                <span className="user-type-badge">{auth.user.typeuser ?? 'user'}</span>
-              </div>
-              <button type="button" className="sidebar-logout-btn" onClick={() => auth.signOut()}>
-                Cerrar sesion
-              </button>
-            </section>
-          )}
         </div>
 
         <nav className="sidebar-nav desktop-nav">
@@ -4446,23 +4364,25 @@ function App() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
-          <div className="topbar-copy">
-            <p className="eyebrow">Panel financiero</p>
-            <h1>{viewLabels[activeView]}</h1>
-            <p className="view-description">{viewDescription}</p>
-          </div>
-          <div className={activeView === 'movimientos' ? 'topbar-meta topbar-meta-inline' : 'topbar-meta'}>
-            <div className="meta-chip">
-              <span>Obligaciones pendientes</span>
-              <strong>{money.format(totals.pendingFixed)}</strong>
+        {activeView !== 'resumen' && (
+          <header className="topbar">
+            <div className="topbar-copy">
+              <p className="eyebrow">Panel financiero</p>
+              <h1>{viewLabels[activeView]}</h1>
+              <p className="view-description">{viewDescription}</p>
             </div>
-            <div className="meta-chip dark">
-              <span>Patrimonio</span>
-              <strong>{money.format(totals.pocketBalance)}</strong>
+            <div className={activeView === 'movimientos' ? 'topbar-meta topbar-meta-inline' : 'topbar-meta'}>
+              <div className="meta-chip">
+                <span>Obligaciones pendientes</span>
+                <strong>{money.format(totals.pendingFixed)}</strong>
+              </div>
+              <div className="meta-chip dark">
+                <span>Patrimonio</span>
+                <strong>{money.format(totals.pocketBalance)}</strong>
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         <div className="view-stage" data-view={activeView}>
           {activeView === 'resumen' && renderSummaryView()}
@@ -4492,95 +4412,53 @@ function App() {
         </button>
 
         <div id="mobile-finance-menu" className={isMobileMenuOpen ? 'mobile-menu-sheet open' : 'mobile-menu-sheet'}>
-          <div className="mobile-menu-section">
-            <button
-              type="button"
-              className="mobile-menu-section-toggle"
-              onClick={() => toggleMobileMenuSection('navegacion')}
-            >
-              <span>Navegacion</span>
-              <span>{mobileMenuSection === 'navegacion' ? '−' : '+'}</span>
-            </button>
-            {mobileMenuSection === 'navegacion' && (
-              <div className="mobile-menu-grid">
-                {orderedViews.map((view) => (
-                  <button
-                    key={view}
-                    type="button"
-                    className={view === activeView ? 'mobile-menu-item active' : 'mobile-menu-item'}
-                    onClick={() => jumpToView(view)}
-                  >
-                    <span className="mobile-menu-item-icon" aria-hidden="true">
-                      {getViewIcon(view)}
-                    </span>
-                    <span>{viewLabels[view]}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className="mobile-menu-section navigation-section">
+            <div className="mobile-menu-grid">
+              {orderedViews.map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  className={view === activeView ? 'mobile-menu-item active' : 'mobile-menu-item'}
+                  onClick={() => jumpToView(view)}
+                >
+                  <span className="mobile-menu-item-icon" aria-hidden="true">
+                    {getViewIcon(view)}
+                  </span>
+                  <span>{viewLabels[view]}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="mobile-menu-section">
-            <button
-              type="button"
-              className="mobile-menu-section-toggle"
-              onClick={() => toggleMobileMenuSection('atajos')}
-            >
-              <span>Componentes clave</span>
-              <span>{mobileMenuSection === 'atajos' ? '−' : '+'}</span>
-            </button>
-            {mobileMenuSection === 'atajos' && (
-              <div className="mobile-menu-actions">
-                <button type="button" className="action-trigger" onClick={openPrimaryActionForCurrentView}>
-                  {activeView === 'movimientos'
-                    ? 'Registrar movimiento'
-                    : activeView === 'bolsillos'
-                      ? 'Crear bolsillo'
-                      : activeView === 'programacion'
-                        ? 'Registrar obligacion'
-                        : activeView === 'deudas'
-                          ? 'Registrar deuda'
-                          : 'Ir a movimientos'}
-                </button>
-                <button type="button" className="secondary-button" onClick={() => jumpToView('resumen')}>
-                  Ver resumen consolidado
-                </button>
-                <button type="button" className="secondary-button" onClick={() => jumpToView('bolsillos')}>
-                  Abrir bolsillos
-                </button>
-                <button type="button" className="secondary-button" onClick={() => jumpToView('programacion')}>
-                  Ver obligaciones
-                </button>
-              </div>
-            )}
+          <div className="mobile-menu-section context-section">
+            <div className="mobile-context-grid">
+              <article className="mobile-context-card">
+                <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
+                <strong>{money.format(totals.pocketBalance)}</strong>
+              </article>
+              <article className="mobile-context-card">
+                <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
+                <strong>{money.format(totals.pendingFixed)}</strong>
+              </article>
+              <article className="mobile-context-card">
+                <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
+                <strong>{money.format(totals.pendingDebt)}</strong>
+              </article>
+            </div>
           </div>
 
-          <div className="mobile-menu-section">
-            <button
-              type="button"
-              className="mobile-menu-section-toggle"
-              onClick={() => toggleMobileMenuSection('contexto')}
-            >
-              <span>Contexto</span>
-              <span>{mobileMenuSection === 'contexto' ? '−' : '+'}</span>
-            </button>
-            {mobileMenuSection === 'contexto' && (
-              <div className="mobile-context-grid">
-                <article className="mobile-context-card">
-                  <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
-                  <strong>{money.format(totals.pocketBalance)}</strong>
-                </article>
-                <article className="mobile-context-card">
-                  <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
-                  <strong>{money.format(totals.pendingFixed)}</strong>
-                </article>
-                <article className="mobile-context-card">
-                  <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
-                  <strong>{money.format(totals.pendingDebt)}</strong>
-                </article>
+          {auth.user && (
+            <div className="mobile-menu-section user-section">
+              <div className="mobile-user-info">
+                <p>@{auth.user.username}</p>
+                <p>{auth.user.cedula}</p>
+                <span className="user-type-badge">{auth.user.typeuser ?? 'user'}</span>
               </div>
-            )}
-          </div>
+              <button type="button" className="mobile-logout-btn" onClick={() => auth.signOut()}>
+                Cerrar sesion
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </main>
