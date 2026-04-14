@@ -95,7 +95,7 @@ export function useSimpleUsersAuth() {
     return { error: null }
   }
 
-  async function signUp(username: string, cedula: string, password: string) {
+  async function signUp(username: string, cedula: string, password: string, nombre?: string) {
     const client = getSupabaseClient()
     if (!client) return { error: 'Supabase no esta configurado.' }
 
@@ -103,7 +103,7 @@ export function useSimpleUsersAuth() {
       p_username: username,
       p_cedula: cedula,
       p_password: password,
-      p_nombre: `Usuario ${cedula}`,
+      p_nombre: nombre?.trim() || `Usuario ${cedula}`,
     })
 
     if (error) return { error: error.message }

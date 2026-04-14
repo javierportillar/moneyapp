@@ -139,6 +139,16 @@ function getViewIcon(view: ViewKey) {
   return <LuSettings2 />
 }
 
+function createRobotCheck() {
+  const left = Math.floor(Math.random() * 7) + 2
+  const right = Math.floor(Math.random() * 8) + 1
+
+  return {
+    prompt: `Confirma que no eres un robot. Resuelve ${left} + ${right}`,
+    expectedAnswer: String(left + right),
+  }
+}
+
 function hydrateState(raw: AppState) {
   const safePockets =
     raw.pockets?.length
@@ -327,10 +337,14 @@ function App() {
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
   const [openPocketDetailId, setOpenPocketDetailId] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
-  const [authForm, setAuthForm] = useState({ username: '', cedula: '', password: '' })
+  const [authForm, setAuthForm] = useState({ username: '', cedula: '', nombre: '', password: '' })
   const [authFeedback, setAuthFeedback] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [showAuthPassword, setShowAuthPassword] = useState(false)
+  const [robotCheck, setRobotCheck] = useState(() => createRobotCheck())
+  const [robotCheckRequested, setRobotCheckRequested] = useState(false)
+  const [robotCheckAnswer, setRobotCheckAnswer] = useState('')
+  const [robotCheckVerified, setRobotCheckVerified] = useState(false)
   const [activeSummaryBreakdown, setActiveSummaryBreakdown] = useState<'ingresos' | 'gastos' | 'saldoAnterior' | null>(null)
   const [bootProgress, setBootProgress] = useState(0)
   const [bootSettled, setBootSettled] = useState(false)
@@ -379,6 +393,20 @@ function App() {
       setSelectedPocketId(state.pockets[0].id)
     }
   }, [selectedPocketId, state.pockets])
+
+  useEffect(() => {
+    if (authMode === 'login') {
+      setRobotCheckRequested(false)
+      setRobotCheckAnswer('')
+      setRobotCheckVerified(false)
+      return
+    }
+
+    setRobotCheck(createRobotCheck())
+    setRobotCheckRequested(false)
+    setRobotCheckAnswer('')
+    setRobotCheckVerified(false)
+  }, [authMode])
 
   const [expenseForm, setExpenseForm] = useState({
     id: '',
@@ -1778,7 +1806,18 @@ function App() {
   async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!authForm.username.trim() || !authForm.password.trim()) return
-    if (authMode === 'register' && !authForm.cedula.trim()) return
+    if (authMode === 'register') {
+      if (!authForm.cedula.trim() || !authForm.nombre.trim()) return
+      if (!robotCheckRequested) {
+        setAuthFeedback('Solicita primero la verificacion anti-bot.')
+        return
+      }
+
+      if (!robotCheckVerified || robotCheckAnswer.trim() !== robotCheck.expectedAnswer) {
+        setAuthFeedback('Completa correctamente la verificacion anti-bot antes de crear el usuario.')
+        return
+      }
+    }
 
     setIsSubmittingAuth(true)
     setAuthFeedback(null)
@@ -1786,7 +1825,12 @@ function App() {
     const result =
       authMode === 'login'
         ? await auth.signIn(authForm.username.trim(), authForm.password)
-        : await auth.signUp(authForm.username.trim(), authForm.cedula.trim(), authForm.password)
+        : await auth.signUp(
+            authForm.username.trim(),
+            authForm.cedula.trim(),
+            authForm.password,
+            authForm.nombre.trim(),
+          )
 
     setIsSubmittingAuth(false)
 
@@ -3060,23 +3104,17 @@ function App() {
           </div>
 
           <div className="movement-command-nav">
-            <div className="movement-command-actions">
-              <div className="movement-command-badge">
-                <span>Mes activo</span>
-                <strong>
-                  <input
-                    type="month"
-                    value={movementMonthKey}
-                    onChange={(event) => setMovementMonthKey(event.target.value)}
-                    className="movement-month-input"
-                  />
-                </strong>
-              </div>
-              <div className="movement-command-badge">
-                <span>Resultados</span>
-                <strong>{movementSummary.count}</strong>
-              </div>
-            </div>
+            <label className="movement-command-badge movement-command-badge-full">
+              <span>Mes activo</span>
+              <strong>
+                <input
+                  type="month"
+                  value={movementMonthKey}
+                  onChange={(event) => setMovementMonthKey(event.target.value)}
+                  className="movement-month-input"
+                />
+              </strong>
+            </label>
           </div>
 
           <button
@@ -3132,18 +3170,24 @@ function App() {
             </div>
           </div>
 
-          <div className="movement-summary-grid refined">
+          <div className="movement-summary-grid refined movement-summary-grid-compact">
               <div className="summary-box movement-stat income">
-                <span>Entradas filtradas</span>
+                <span>Entradas</span>
                 <strong>{money.format(movementSummary.inflow)}</strong>
               </div>
               <div className="summary-box movement-stat expense">
-                <span>Salidas filtradas</span>
+                <span>Salidas</span>
                 <strong>{money.format(movementSummary.outflow)}</strong>
               </div>
+              <div className="summary-box movement-stat balance">
+                <span>Balance</span>
+                <strong className={movementSummary.inflow - movementSummary.outflow >= 0 ? 'value-positive' : 'value-negative'}>
+                  {money.format(movementSummary.inflow - movementSummary.outflow)}
+                </strong>
+              </div>
               <div className="summary-box movement-stat transfer">
-                <span>Transferencias</span>
-                <strong>{movementSummary.transfers}</strong>
+                <span>Movimientos</span>
+                <strong>{movementSummary.count}</strong>
               </div>
           </div>
         </section>
@@ -3152,10 +3196,8 @@ function App() {
           <section className="panel banking-panel movement-ledger-panel">
             <div className="panel-header">
               <div>
-                <span className="micro-label">Libro mayor</span>
-                <h2>Detalle del mes</h2>
+                <h2>Movimientos detallado</h2>
               </div>
-              <p>{filteredActivity.length} registros visibles</p>
             </div>
             <div className="ledger simple-movement-list">
               {filteredActivity.map((item) => (
@@ -4317,57 +4359,150 @@ function App() {
           </div>
 
           <form className="bank-form auth-form" onSubmit={handleAuthSubmit}>
-            <label>
-              Username
-              <input
-                value={authForm.username}
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, username: event.target.value }))
-                }
-                placeholder="usuario_admin"
-              />
-            </label>
-            {authMode === 'register' && (
-              <label>
-                Cedula
-                <input
-                  inputMode="numeric"
-                  value={authForm.cedula}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({ ...current, cedula: event.target.value }))
-                  }
-                  placeholder="1234567890"
-                />
-              </label>
-            )}
-            <label>
-              Contrasena
-              <div className="password-field password-field-auth">
-                <input
-                  type={showAuthPassword ? 'text' : 'password'}
-                  value={authForm.password}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({ ...current, password: event.target.value }))
-                  }
-                  placeholder={authMode === 'login' ? 'Ingresa tu contrasena' : 'Define la contrasena inicial'}
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowAuthPassword((current) => !current)}
-                  aria-label={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
-                  title={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
-                >
-                  {showAuthPassword ? <LuEyeOff /> : <LuEye />}
-                </button>
+            {authMode === 'register' ? (
+              <div className="form-grid three">
+                <label>
+                  Username
+                  <input
+                    value={authForm.username}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({ ...current, username: event.target.value }))
+                    }
+                    placeholder="usuario_nuevo"
+                  />
+                </label>
+                <label>
+                  Cedula
+                  <input
+                    inputMode="numeric"
+                    value={authForm.cedula}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({ ...current, cedula: event.target.value }))
+                    }
+                    placeholder="1234567890"
+                  />
+                </label>
+                <label>
+                  Nombre
+                  <input
+                    value={authForm.nombre}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({ ...current, nombre: event.target.value }))
+                    }
+                    placeholder="Nombre del usuario"
+                  />
+                </label>
+                <label>
+                  Contrasena
+                  <div className="password-field password-field-auth">
+                    <input
+                      type={showAuthPassword ? 'text' : 'password'}
+                      value={authForm.password}
+                      onChange={(event) =>
+                        setAuthForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Contrasena inicial"
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowAuthPassword((current) => !current)}
+                      aria-label={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                      title={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                    >
+                      {showAuthPassword ? <LuEyeOff /> : <LuEye />}
+                    </button>
+                  </div>
+                </label>
               </div>
-            </label>
+            ) : (
+              <>
+                <label>
+                  Username
+                  <input
+                    value={authForm.username}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({ ...current, username: event.target.value }))
+                    }
+                    placeholder="usuario_admin"
+                  />
+                </label>
+                <label>
+                  Contrasena
+                  <div className="password-field password-field-auth">
+                    <input
+                      type={showAuthPassword ? 'text' : 'password'}
+                      value={authForm.password}
+                      onChange={(event) =>
+                        setAuthForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Ingresa tu contrasena"
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowAuthPassword((current) => !current)}
+                      aria-label={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                      title={showAuthPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                    >
+                      {showAuthPassword ? <LuEyeOff /> : <LuEye />}
+                    </button>
+                  </div>
+                </label>
+              </>
+            )}
+            {authMode === 'register' && (
+              <div className="robot-check-card">
+                <div className="robot-check-header">
+                  <div>
+                    <span className="micro-label">Verificacion</span>
+                    <strong>No robot</strong>
+                    <p>Antes de crear el usuario, solicita y completa una validacion simple.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setRobotCheck(createRobotCheck())
+                      setRobotCheckRequested(true)
+                      setRobotCheckAnswer('')
+                      setRobotCheckVerified(false)
+                      setAuthFeedback(null)
+                    }}
+                  >
+                    {robotCheckRequested ? 'Nueva verificacion' : 'Solicitar verificacion'}
+                  </button>
+                </div>
+                {robotCheckRequested && (
+                  <div className="robot-check-body">
+                    <label>
+                      {robotCheck.prompt}
+                      <input
+                        inputMode="numeric"
+                        value={robotCheckAnswer}
+                        onChange={(event) => {
+                          const nextAnswer = event.target.value.replace(/\D/g, '')
+                          setRobotCheckAnswer(nextAnswer)
+                          setRobotCheckVerified(nextAnswer === robotCheck.expectedAnswer)
+                        }}
+                        placeholder="Escribe el resultado"
+                      />
+                    </label>
+                    <p className={`robot-check-status ${robotCheckVerified ? 'success' : ''}`}>
+                      {robotCheckVerified
+                        ? 'Verificacion completada. Ya puedes crear el usuario.'
+                        : 'Resuelve la operacion para habilitar el registro.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             <button type="submit" disabled={isSubmittingAuth}>
               {isSubmittingAuth
                 ? 'Procesando...'
                 : authMode === 'login'
                   ? 'Ingresar'
-                  : 'Crear usuario simple'}
+                  : 'Crear usuario'}
             </button>
             <button
               type="button"
@@ -4376,6 +4511,7 @@ function App() {
                 setAuthMode((current) => (current === 'login' ? 'register' : 'login'))
                 setAuthFeedback(null)
                 setShowAuthPassword(false)
+                setAuthForm({ username: '', cedula: '', nombre: '', password: '' })
               }}
             >
               {authMode === 'login' ? 'Crear cuenta' : 'Ya tengo cuenta'}
@@ -4441,14 +4577,14 @@ function App() {
       </aside>
 
       <section className="workspace">
-        {activeView !== 'resumen' && (
+        {activeView !== 'resumen' && activeView !== 'movimientos' && (
           <header className="topbar">
             <div className="topbar-copy">
               <p className="eyebrow">Panel financiero</p>
               <h1>{viewLabels[activeView]}</h1>
               <p className="view-description">{viewDescription}</p>
             </div>
-            <div className={activeView === 'movimientos' ? 'topbar-meta topbar-meta-inline' : 'topbar-meta'}>
+            <div className="topbar-meta">
               <div className="meta-chip">
                 <span>Obligaciones pendientes</span>
                 <strong>{money.format(totals.pendingFixed)}</strong>
