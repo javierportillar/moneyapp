@@ -53,6 +53,11 @@ const money = new Intl.NumberFormat('es-CO', {
   maximumFractionDigits: 0,
 })
 
+const percent = new Intl.NumberFormat('es-CO', {
+  style: 'percent',
+  maximumFractionDigits: 0,
+})
+
 const dateFormatter = new Intl.DateTimeFormat('es-CO', {
   day: 'numeric',
   month: 'long',
@@ -485,6 +490,7 @@ function App() {
   const [showUserAdminForm, setShowUserAdminForm] = useState(false)
   const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isMobileMenuCompact, setIsMobileMenuCompact] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
@@ -499,6 +505,24 @@ function App() {
   useEffect(() => {
     setIsMobileMenuOpen(false)
   }, [activeView])
+
+  useEffect(() => {
+    setIsMobileMenuCompact(false)
+
+    const compactTimer = window.setTimeout(() => {
+      setIsMobileMenuCompact(true)
+    }, 2200)
+
+    return () => {
+      window.clearTimeout(compactTimer)
+    }
+  }, [activeView, activeModule])
+
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      setIsMobileMenuCompact(false)
+    }
+  }, [isMobileMenuOpen])
 
   const suggestion = useMemo(
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
@@ -820,6 +844,18 @@ function App() {
     }
   }, [filteredActivity])
 
+  const movementExpenseRatio =
+    movementSummary.inflow > 0
+      ? movementSummary.outflow / movementSummary.inflow
+      : movementSummary.outflow > 0
+        ? 1
+        : 0
+  const movementTransferShare =
+    movementSummary.count > 0 ? movementSummary.transfers / movementSummary.count : 0
+  const movementVolume = movementSummary.inflow + movementSummary.outflow
+  const movementAverageTicket =
+    movementSummary.count > 0 ? movementVolume / movementSummary.count : 0
+
   const summaryDrilldown = useMemo(() => {
     const previousMovements = [
       ...state.incomes
@@ -994,7 +1030,6 @@ function App() {
     }
     return 'La operacion del mes esta bajo control. Ya puedes pensar en automatizacion y conexion bancaria real.'
   }, [fixedStatus.overdue.length, fixedStatus.pending.length, totals.netFlow])
-
   function getPocketTypeLabel(type: PocketType) {
     return state.config.pocketTypeLabels[type] || describePocketType(type)
   }
@@ -3170,24 +3205,29 @@ function App() {
             </div>
           </div>
 
-          <div className="movement-summary-grid refined movement-summary-grid-compact">
+            <div
+              className="movement-summary-grid refined movement-summary-grid-compact movement-summary-grid-premium"
+              style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}
+            >
               <div className="summary-box movement-stat income">
                 <span>Entradas</span>
                 <strong>{money.format(movementSummary.inflow)}</strong>
+                <small>Flujo positivo del periodo</small>
               </div>
               <div className="summary-box movement-stat expense">
                 <span>Salidas</span>
                 <strong>{money.format(movementSummary.outflow)}</strong>
-              </div>
-              <div className="summary-box movement-stat balance">
-                <span>Balance</span>
-                <strong className={movementSummary.inflow - movementSummary.outflow >= 0 ? 'value-positive' : 'value-negative'}>
-                  {money.format(movementSummary.inflow - movementSummary.outflow)}
-                </strong>
+                <small>{percent.format(movementExpenseRatio)} consumido</small>
               </div>
               <div className="summary-box movement-stat transfer">
                 <span>Movimientos</span>
                 <strong>{movementSummary.count}</strong>
+                <small>Ticket medio {money.format(movementAverageTicket)}</small>
+              </div>
+              <div className="summary-box movement-stat balance neutral">
+                <span>Transferencias</span>
+                <strong>{movementSummary.transfers}</strong>
+                <small>{percent.format(movementTransferShare)} del total</small>
               </div>
           </div>
         </section>
@@ -4339,7 +4379,7 @@ function App() {
   if (auth.isConfigured && !auth.user) {
     return (
       <main className="auth-shell">
-        <section className="auth-panel">
+        <section className={authMode === 'register' ? 'auth-panel register-mode' : 'auth-panel'}>
           <div className="auth-brand">
             <div className="brand-mark">
               <LuWallet />
@@ -4360,7 +4400,7 @@ function App() {
 
           <form className="bank-form auth-form" onSubmit={handleAuthSubmit}>
             {authMode === 'register' ? (
-              <div className="form-grid three">
+              <div className="form-grid three auth-register-grid">
                 <label>
                   Username
                   <input
@@ -4392,7 +4432,7 @@ function App() {
                     placeholder="Nombre del usuario"
                   />
                 </label>
-                <label>
+                <label className="auth-register-password">
                   Contrasena
                   <div className="password-field password-field-auth">
                     <input
@@ -4475,8 +4515,8 @@ function App() {
                 </div>
                 {robotCheckRequested && (
                   <div className="robot-check-body">
-                    <label>
-                      {robotCheck.prompt}
+                    <label className="robot-check-input-group">
+                      <span className="robot-check-prompt">{robotCheck.prompt}</span>
                       <input
                         inputMode="numeric"
                         value={robotCheckAnswer}
@@ -4610,10 +4650,19 @@ function App() {
       <div className="mobile-menu-shell">
         <button
           type="button"
-          className={isMobileMenuOpen ? 'mobile-menu-trigger active' : 'mobile-menu-trigger'}
+          className={
+            [
+              'mobile-menu-trigger',
+              isMobileMenuOpen ? 'active' : '',
+              !isMobileMenuOpen && isMobileMenuCompact ? 'compact' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          }
           onClick={() => setIsMobileMenuOpen((current) => !current)}
           aria-expanded={isMobileMenuOpen}
           aria-controls="mobile-finance-menu"
+          aria-label={isMobileMenuOpen || !isMobileMenuCompact ? `Abrir menu de ${viewLabels[activeView]}` : 'Abrir menu'}
         >
           <span className="mobile-menu-trigger-copy">
             <strong>{viewLabels[activeView]}</strong>
