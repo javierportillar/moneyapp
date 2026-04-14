@@ -4411,8 +4411,36 @@ function App() {
           </span>
         </button>
 
+        {isMobileMenuOpen && (
+          <button
+            type="button"
+            className="mobile-menu-backdrop"
+            aria-label="Cerrar navegacion"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+
         <div id="mobile-finance-menu" className={isMobileMenuOpen ? 'mobile-menu-sheet open' : 'mobile-menu-sheet'}>
+          <div className="mobile-context-strip">
+            <article className="mobile-context-card">
+              <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
+              <strong>{money.format(totals.pocketBalance)}</strong>
+            </article>
+            <article className="mobile-context-card">
+              <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
+              <strong>{money.format(totals.pendingFixed)}</strong>
+            </article>
+            <article className="mobile-context-card">
+              <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
+              <strong>{money.format(totals.pendingDebt)}</strong>
+            </article>
+          </div>
+
           <div className="mobile-menu-section navigation-section">
+            <div className="mobile-menu-section-head">
+              <span className="micro-label">Navegacion</span>
+              <strong>Secciones</strong>
+            </div>
             <div className="mobile-menu-grid">
               {orderedViews.map((view) => (
                 <button
@@ -4429,36 +4457,6 @@ function App() {
               ))}
             </div>
           </div>
-
-          <div className="mobile-menu-section context-section">
-            <div className="mobile-context-grid">
-              <article className="mobile-context-card">
-                <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
-                <strong>{money.format(totals.pocketBalance)}</strong>
-              </article>
-              <article className="mobile-context-card">
-                <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
-                <strong>{money.format(totals.pendingFixed)}</strong>
-              </article>
-              <article className="mobile-context-card">
-                <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
-                <strong>{money.format(totals.pendingDebt)}</strong>
-              </article>
-            </div>
-          </div>
-
-          {auth.user && (
-            <div className="mobile-menu-section user-section">
-              <div className="mobile-user-info">
-                <p>@{auth.user.username}</p>
-                <p>{auth.user.cedula}</p>
-                <span className="user-type-badge">{auth.user.typeuser ?? 'user'}</span>
-              </div>
-              <button type="button" className="mobile-logout-btn" onClick={() => auth.signOut()}>
-                Cerrar sesion
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </main>
