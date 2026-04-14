@@ -201,6 +201,58 @@ function MetricLabel({ label, info }: { label: string; info?: string }) {
   )
 }
 
+function LoadingProgress({
+  progress,
+  label,
+  title,
+  description,
+}: {
+  progress: number
+  label: string
+  title: string
+  description: string
+}) {
+  const normalizedProgress = Math.max(0, Math.min(100, progress))
+  const radius = 76
+  const circumference = 2 * Math.PI * radius
+  const dashOffset = circumference - (normalizedProgress / 100) * circumference
+  const isComplete = normalizedProgress >= 100
+
+  return (
+    <div className="loading-progress-shell">
+      <span className="micro-label">{label}</span>
+      <div className={isComplete ? 'loading-ring complete' : 'loading-ring'}>
+        <svg viewBox="0 0 180 180" aria-hidden="true">
+          <defs>
+            <linearGradient id="loadingRingGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#60a5fa" />
+              <stop offset="55%" stopColor="#67e8f9" />
+              <stop offset="100%" stopColor="#34d399" />
+            </linearGradient>
+          </defs>
+          <circle className="loading-ring-track" cx="90" cy="90" r={radius} />
+          <circle
+            className="loading-ring-value"
+            cx="90"
+            cy="90"
+            r={radius}
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+          />
+        </svg>
+        <div className="loading-ring-center">
+          <strong>{normalizedProgress}%</strong>
+          <span>{isComplete ? 'Completo' : 'Cargando'}</span>
+        </div>
+      </div>
+      <div className="loading-copy">
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+    </div>
+  )
+}
+
 function SectionFrame({
   label,
   title,
@@ -280,7 +332,36 @@ function App() {
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [showAuthPassword, setShowAuthPassword] = useState(false)
   const [activeSummaryBreakdown, setActiveSummaryBreakdown] = useState<'ingresos' | 'gastos' | 'saldoAnterior' | null>(null)
+  const [bootProgress, setBootProgress] = useState(0)
+  const [bootSettled, setBootSettled] = useState(false)
   const isAdminUser = auth.user?.typeuser === 'admin'
+  const loadingPending = (auth.isConfigured && auth.isLoading) || !isReady
+
+  useEffect(() => {
+    let progressTimer: number | undefined
+    let finishTimer: number | undefined
+
+    if (loadingPending) {
+      setBootSettled(false)
+      progressTimer = window.setInterval(() => {
+        setBootProgress((current) => {
+          if (current >= 94) return current
+          const nextStep = current < 20 ? 5 : current < 55 ? 3 : 2
+          return Math.min(94, current + nextStep)
+        })
+      }, 90)
+    } else {
+      setBootProgress(100)
+      finishTimer = window.setTimeout(() => {
+        setBootSettled(true)
+      }, 420)
+    }
+
+    return () => {
+      if (progressTimer) window.clearInterval(progressTimer)
+      if (finishTimer) window.clearTimeout(finishTimer)
+    }
+  }, [loadingPending])
 
   useEffect(() => {
     if (isAdminUser) {
@@ -4189,14 +4270,24 @@ function App() {
               ? 'Seguimiento de deudas hasta saldo cero'
             : 'Categorias y parametros generales de la aplicacion'
 
-  if (auth.isConfigured && auth.isLoading) {
+  if (loadingPending || !bootSettled) {
+    const loadingLabel = auth.isConfigured && auth.isLoading ? 'Usuarios' : 'Inicializando'
+    const loadingTitle = auth.isConfigured && auth.isLoading ? 'Validando acceso' : 'Cargando datos financieros'
+    const loadingDescription =
+      auth.isConfigured && auth.isLoading
+        ? 'Estoy conectando tu username con la base de datos.'
+        : 'Estoy preparando la informacion local y la capa de sincronizacion.'
+
     return (
       <main className="banking-app loading-shell">
         <section className="workspace">
-          <div className="panel banking-panel emphasis">
-            <span className="micro-label">Usuarios</span>
-            <h1>Validando acceso</h1>
-            <p>Estoy conectando tu username con la base de datos.</p>
+          <div className="panel banking-panel emphasis loading-panel">
+            <LoadingProgress
+              progress={bootProgress}
+              label={loadingLabel}
+              title={loadingTitle}
+              description={loadingDescription}
+            />
           </div>
         </section>
       </main>
@@ -4296,20 +4387,6 @@ function App() {
               <p>{authFeedback ?? auth.authError}</p>
             </div>
           )}
-        </section>
-      </main>
-    )
-  }
-
-  if (!isReady) {
-    return (
-      <main className="banking-app loading-shell">
-        <section className="workspace">
-          <div className="panel banking-panel emphasis">
-            <span className="micro-label">Inicializando</span>
-            <h1>Cargando datos financieros</h1>
-            <p>Estoy preparando la informacion local y la capa de sincronizacion.</p>
-          </div>
         </section>
       </main>
     )

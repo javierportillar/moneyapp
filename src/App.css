@@ -1971,6 +1971,102 @@
   grid-template-columns: 1fr;
 }
 
+.loading-shell .workspace {
+  min-height: 100vh;
+  place-items: center;
+}
+
+.loading-panel {
+  width: min(560px, 100%);
+  padding: 32px;
+  border-radius: 32px;
+}
+
+.loading-progress-shell {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  text-align: center;
+}
+
+.loading-ring {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+}
+
+.loading-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.loading-ring-track,
+.loading-ring-value {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+
+.loading-ring-track {
+  stroke: rgba(148, 163, 184, 0.16);
+}
+
+.loading-ring-value {
+  stroke: url(#loadingRingGradient);
+  transition: stroke-dashoffset 180ms ease, stroke 220ms ease;
+  filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.2));
+}
+
+.loading-ring.complete .loading-ring-value {
+  stroke: #22c55e;
+  filter: drop-shadow(0 0 14px rgba(34, 197, 94, 0.32));
+}
+
+.loading-ring-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  align-content: center;
+}
+
+.loading-ring-center strong {
+  color: var(--text-primary);
+  font-size: 2.2rem;
+  line-height: 1;
+}
+
+.loading-ring-center span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.loading-copy {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.loading-copy h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
+
+.loading-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
 @media (max-width: 1180px) {
   .banking-app {
     grid-template-columns: 1fr;
