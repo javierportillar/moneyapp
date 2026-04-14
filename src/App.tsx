@@ -524,6 +524,16 @@ function App() {
     }
   }, [isMobileMenuOpen])
 
+  function openMobileMenu() {
+    setIsMobileMenuCompact(false)
+    setIsMobileMenuOpen(true)
+  }
+
+  function closeMobileMenu() {
+    setIsMobileMenuOpen(false)
+    setIsMobileMenuCompact(true)
+  }
+
   const suggestion = useMemo(
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
     [expenseForm.description, state.learningRules],
@@ -1036,7 +1046,7 @@ function App() {
 
   function jumpToView(view: ViewKey, module?: ModuleKey) {
     setActiveView(view)
-    setIsMobileMenuOpen(false)
+    closeMobileMenu()
     if (module) setActiveModule(module)
   }
 
@@ -4648,77 +4658,104 @@ function App() {
       </section>
 
       <div className="mobile-menu-shell">
-        <button
-          type="button"
-          className={
-            [
-              'mobile-menu-trigger',
-              isMobileMenuOpen ? 'active' : '',
-              !isMobileMenuOpen && isMobileMenuCompact ? 'compact' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-          }
-          onClick={() => setIsMobileMenuOpen((current) => !current)}
-          aria-expanded={isMobileMenuOpen}
-          aria-controls="mobile-finance-menu"
-          aria-label={isMobileMenuOpen || !isMobileMenuCompact ? `Abrir menu de ${viewLabels[activeView]}` : 'Abrir menu'}
-        >
-          <span className="mobile-menu-trigger-copy">
-            <strong>{viewLabels[activeView]}</strong>
-            <span>Navegacion y accesos</span>
-          </span>
-          <span className={isMobileMenuOpen ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
-            <LuMenu />
-          </span>
-        </button>
-
         {isMobileMenuOpen && (
           <button
             type="button"
             className="mobile-menu-backdrop"
             aria-label="Cerrar navegacion"
-            onClick={() => setIsMobileMenuOpen(false)}
+            onClick={closeMobileMenu}
           />
         )}
 
-        <div id="mobile-finance-menu" className={isMobileMenuOpen ? 'mobile-menu-sheet open' : 'mobile-menu-sheet'}>
-          <div className="mobile-context-strip">
-            <article className="mobile-context-card">
-              <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
-              <strong>{money.format(totals.pocketBalance)}</strong>
-            </article>
-            <article className="mobile-context-card">
-              <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
-              <strong>{money.format(totals.pendingFixed)}</strong>
-            </article>
-            <article className="mobile-context-card">
-              <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
-              <strong>{money.format(totals.pendingDebt)}</strong>
-            </article>
-          </div>
+        <div className={isMobileMenuOpen ? 'mobile-menu-panel open' : 'mobile-menu-panel'}>
+          <button
+            type="button"
+            className={
+              [
+                'mobile-menu-trigger',
+                isMobileMenuOpen ? 'active' : '',
+                !isMobileMenuOpen && isMobileMenuCompact ? 'compact' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')
+            }
+            onClick={() => {
+              if (isMobileMenuOpen) {
+                closeMobileMenu()
+                return
+              }
 
-          <div className="mobile-menu-section navigation-section">
-            <div className="mobile-menu-section-head">
-              <span className="micro-label">Navegacion</span>
-              <strong>Secciones</strong>
-            </div>
-            <div className="mobile-menu-grid">
-              {orderedViews.map((view) => (
+              openMobileMenu()
+            }}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="mobile-finance-menu"
+            aria-label={isMobileMenuOpen ? `Cerrar menu de ${viewLabels[activeView]}` : `Abrir menu de ${viewLabels[activeView]}`}
+          >
+            <span className="mobile-menu-trigger-copy">
+              <strong>{viewLabels[activeView]}</strong>
+              <span>Navegacion y accesos</span>
+            </span>
+            <span className={isMobileMenuOpen ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
+              <LuMenu />
+            </span>
+          </button>
+
+          {isMobileMenuOpen && (
+            <div id="mobile-finance-menu" className="mobile-menu-sheet open">
+              <div className="mobile-menu-head">
+                <div className="mobile-menu-head-copy">
+                  <span className="micro-label">Navegacion</span>
+                  <strong>{viewLabels[activeView]}</strong>
+                  <p>Mueve rapido entre modulos y revisa el contexto financiero del mes.</p>
+                </div>
                 <button
-                  key={view}
                   type="button"
-                  className={view === activeView ? 'mobile-menu-item active' : 'mobile-menu-item'}
-                  onClick={() => jumpToView(view)}
+                  className="mobile-menu-close"
+                  onClick={closeMobileMenu}
+                  aria-label="Cerrar menu"
                 >
-                  <span className="mobile-menu-item-icon" aria-hidden="true">
-                    {getViewIcon(view)}
-                  </span>
-                  <span>{viewLabels[view]}</span>
+                  <LuX />
                 </button>
-              ))}
+              </div>
+
+              <div className="mobile-context-strip">
+                <article className="mobile-context-card">
+                  <MetricLabel label="Saldo total" info="Valor total distribuido entre todos tus bolsillos en este momento." />
+                  <strong>{money.format(totals.pocketBalance)}</strong>
+                </article>
+                <article className="mobile-context-card">
+                  <MetricLabel label="Pendiente fijo" info="Monto de obligaciones activas aún no confirmadas en el mes." />
+                  <strong>{money.format(totals.pendingFixed)}</strong>
+                </article>
+                <article className="mobile-context-card wide">
+                  <MetricLabel label="Deuda pendiente" info="Saldo restante por pagar en las deudas activas." />
+                  <strong>{money.format(totals.pendingDebt)}</strong>
+                </article>
+              </div>
+
+              <div className="mobile-menu-section navigation-section">
+                <div className="mobile-menu-section-head">
+                  <span className="micro-label">Secciones</span>
+                  <strong>Cambia de vista</strong>
+                </div>
+                <div className="mobile-menu-grid">
+                  {orderedViews.map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      className={view === activeView ? 'mobile-menu-item active' : 'mobile-menu-item'}
+                      onClick={() => jumpToView(view)}
+                    >
+                      <span className="mobile-menu-item-icon" aria-hidden="true">
+                        {getViewIcon(view)}
+                      </span>
+                      <span>{viewLabels[view]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </main>
