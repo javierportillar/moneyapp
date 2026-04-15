@@ -585,9 +585,10 @@
   position: relative;
   z-index: 1;
   width: 100%;
-  height: 100%;
-  max-height: 100vh;
-  overflow-y: auto;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   border-radius: 0;
   border: none;
   box-shadow: none;
@@ -600,6 +601,12 @@
 
 .fullscreen-composer-body {
   margin-top: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 2px 28px;
 }
 
 .composer-toolbar {
@@ -610,9 +617,8 @@
   margin-bottom: 0;
   padding-bottom: 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  position: sticky;
-  top: 0;
-  background: inherit;
+  position: relative;
+  background: transparent;
   z-index: 2;
 }
 
@@ -626,12 +632,20 @@
 }
 
 .composer-toolbar.fullscreen {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 2;
   padding-bottom: 18px;
   margin-bottom: 20px;
   background: transparent;
+}
+
+.composer-toolbar-minimal {
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+  min-height: 46px;
 }
 
 .text-link {
@@ -715,6 +729,251 @@
   background: #0f172a;
   color: white;
   border-color: transparent;
+}
+
+.movement-composer-panel {
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.16), transparent 26%),
+    radial-gradient(circle at top left, rgba(52, 211, 153, 0.1), transparent 22%),
+    linear-gradient(180deg, #121a2d 0%, #0c1322 100%);
+  padding-top: 12px;
+}
+
+.movement-composer-toolbar {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  min-height: 0;
+}
+
+.movement-composer-toolbar h2 {
+  font-size: clamp(2rem, 4vw, 2.55rem);
+  line-height: 1.02;
+}
+
+.movement-composer-toolbar p {
+  max-width: 560px;
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.movement-composer-body {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 48px;
+}
+
+.movement-composer-switcher-card {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  overflow: visible;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.02)),
+    rgba(15, 23, 42, 0.44);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 24px 44px rgba(0, 0, 0, 0.22);
+}
+
+.movement-composer-switcher-copy p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+}
+
+.movement-composer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: auto;
+  z-index: 12;
+}
+
+.movement-composer-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.movement-composer-segmented .segment {
+  min-height: 54px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.movement-composer-segmented .segment.active {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(37, 99, 235, 0.88));
+}
+
+.movement-form {
+  gap: 18px;
+}
+
+.movement-form-hero,
+.movement-form-card {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.015)),
+    rgba(15, 23, 42, 0.48);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 34px rgba(0, 0, 0, 0.18);
+}
+
+.movement-form-hero {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+}
+
+.movement-form-hero strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--title);
+  font-size: 1.28rem;
+}
+
+.movement-form-hero p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.movement-form-hero-expense {
+  background:
+    radial-gradient(circle at top right, rgba(248, 113, 113, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.015)),
+    rgba(15, 23, 42, 0.48);
+}
+
+.movement-form-hero-income {
+  background:
+    radial-gradient(circle at top right, rgba(52, 211, 153, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.015)),
+    rgba(15, 23, 42, 0.48);
+}
+
+.movement-form-hero-transfer {
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.015)),
+    rgba(15, 23, 42, 0.48);
+}
+
+.movement-hero-badges {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.movement-hero-badges span,
+.movement-section-label {
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.movement-hero-badges span {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.3);
+}
+
+.movement-form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.movement-form-card {
+  padding: 20px;
+}
+
+.movement-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.movement-field-span-2 {
+  grid-column: 1 / -1;
+}
+
+.movement-smart-box {
+  height: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.12), transparent 24%),
+    rgba(255, 255, 255, 0.02);
+}
+
+.movement-toggle-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.movement-toggle-card strong,
+.movement-transfer-preview strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.1rem;
+  color: var(--title);
+}
+
+.movement-toggle-card p,
+.movement-transfer-preview p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.movement-toggle-card input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+}
+
+.movement-transfer-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.movement-transfer-arrow {
+  width: fit-content;
+  margin: 4px 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.movement-form-actions {
+  justify-content: flex-start;
+  padding-top: 2px;
+}
+
+.movement-form-actions .secondary-button,
+.movement-form-actions button {
+  min-width: min(220px, 100%);
 }
 
 .bank-form {
@@ -2277,8 +2536,8 @@
 
   .fullscreen-composer-panel {
     width: 100%;
-    max-height: 100vh;
-    min-height: 100vh;
+    max-height: 100dvh;
+    min-height: 100dvh;
     border-radius: 0;
     padding: 24px 20px;
   }
@@ -2292,6 +2551,18 @@
   .fullscreen-composer-body {
     flex: 1;
     overflow-y: auto;
+  }
+
+  .movement-form-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-composer-segmented {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .movement-composer-segmented .segment:last-child {
+    grid-column: 1 / -1;
   }
 
   .topbar,
@@ -2597,6 +2868,14 @@
   .obligation-chip-row,
   .module-segmented {
     gap: 8px;
+  }
+
+  .movement-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-field-span-2 {
+    grid-column: auto;
   }
 
   .segment {
@@ -3627,7 +3906,8 @@
       box-shadow 320ms ease,
       transform 320ms ease,
       border-color 320ms ease,
-      background 320ms ease;
+      background 320ms ease,
+      opacity 220ms ease;
   }
 
   .mobile-menu-trigger-copy {
@@ -3658,6 +3938,19 @@
 
   .mobile-menu-trigger-icon.open {
     transform: rotate(180deg);
+  }
+
+  .mobile-menu-trigger.closing {
+    transform: translateY(2px) scale(0.985);
+  }
+
+  .mobile-menu-trigger.closing .mobile-menu-trigger-copy {
+    opacity: 0;
+    transform: translateX(12px) scale(0.96);
+  }
+
+  .mobile-menu-trigger.closing .mobile-menu-trigger-icon {
+    transform: translateX(4px) scale(0.94);
   }
 
   .mobile-menu-trigger.compact {
@@ -3706,15 +3999,28 @@
     transform: translateY(10px);
     max-height: 0;
     overflow: hidden;
-    transition: opacity var(--t-base), transform var(--t-base), max-height var(--t-slow);
+    visibility: hidden;
+    transition: opacity var(--t-base), transform var(--t-base), max-height var(--t-slow), visibility 0s linear var(--t-base);
     width: 100%;
     max-width: 420px;
+    pointer-events: none;
   }
 
   .mobile-menu-sheet.open {
     opacity: 1;
     transform: translateY(0);
     max-height: 80vh;
+    visibility: visible;
+    transition: opacity var(--t-base), transform var(--t-base), max-height var(--t-slow);
+    pointer-events: auto;
+  }
+
+  .mobile-menu-sheet.closing {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+    max-height: 80vh;
+    visibility: visible;
+    pointer-events: none;
   }
 
   .mobile-menu-section {
@@ -4203,6 +4509,47 @@
 }
 
 @media (max-width: 640px) {
+  .fullscreen-composer-panel {
+    padding: 20px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .movement-composer-panel {
+    padding-top: 10px;
+  }
+
+  .movement-composer-toolbar h2 {
+    font-size: 1.8rem;
+  }
+
+  .movement-composer-switcher-card,
+  .movement-form-card,
+  .movement-form-hero {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .movement-composer-segmented {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-composer-close {
+    top: 10px;
+    right: 10px;
+    left: auto;
+  }
+
+  .movement-composer-segmented .segment:last-child {
+    grid-column: auto;
+  }
+
+  .movement-toggle-card {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-form-actions > * {
+    width: 100%;
+  }
+
   .movement-overview-head,
   .movement-overview-meta {
     display: grid;
@@ -4950,6 +5297,12 @@
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     pointer-events: auto;
+    opacity: 0;
+    transition: opacity 220ms ease;
+  }
+
+  .mobile-menu-backdrop.open {
+    opacity: 1;
   }
 
   .mobile-menu-trigger {
@@ -5007,6 +5360,7 @@
     box-shadow:
       0 26px 60px rgba(0, 0, 0, 0.48),
       inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transform-origin: right bottom;
   }
 
   .mobile-menu-sheet.open {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   LuArrowLeftRight,
   LuChevronDown,
@@ -491,7 +491,9 @@ function App() {
   const [showUserAdminPassword, setShowUserAdminPassword] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isMobileMenuCompact, setIsMobileMenuCompact] = useState(false)
+  const [isMobileMenuClosing, setIsMobileMenuClosing] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
+  const mobileMenuCloseTimerRef = useRef<number | null>(null)
   const [userAdminForm, setUserAdminForm] = useState({
     username: '',
     cedula: '',
@@ -504,6 +506,7 @@ function App() {
 
   useEffect(() => {
     setIsMobileMenuOpen(false)
+    setIsMobileMenuClosing(false)
   }, [activeView])
 
   useEffect(() => {
@@ -524,14 +527,38 @@ function App() {
     }
   }, [isMobileMenuOpen])
 
+  useEffect(() => {
+    return () => {
+      if (mobileMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(mobileMenuCloseTimerRef.current)
+      }
+    }
+  }, [])
+
   function openMobileMenu() {
+    if (mobileMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(mobileMenuCloseTimerRef.current)
+      mobileMenuCloseTimerRef.current = null
+    }
+
+    setIsMobileMenuClosing(false)
     setIsMobileMenuCompact(false)
     setIsMobileMenuOpen(true)
   }
 
   function closeMobileMenu() {
     setIsMobileMenuOpen(false)
-    setIsMobileMenuCompact(true)
+    setIsMobileMenuClosing(true)
+
+    if (mobileMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(mobileMenuCloseTimerRef.current)
+    }
+
+    mobileMenuCloseTimerRef.current = window.setTimeout(() => {
+      setIsMobileMenuCompact(true)
+      setIsMobileMenuClosing(false)
+      mobileMenuCloseTimerRef.current = null
+    }, 220)
   }
 
   const suggestion = useMemo(
@@ -1049,6 +1076,8 @@ function App() {
     closeMobileMenu()
     if (module) setActiveModule(module)
   }
+
+  const isMobileMenuExpanded = isMobileMenuOpen || isMobileMenuClosing
 
   function isSectionCollapsed(sectionId: string) {
     return collapsedSections[sectionId] ?? false
@@ -1893,216 +1922,311 @@ function App() {
 
   function renderActiveForm() {
     if (activeModule === 'gasto') {
+      const selectedExpensePocketName = getPocketName(state.pockets, expenseForm.pocketId)
+
       return (
-        <form className="bank-form" onSubmit={handleAddExpense}>
-          <label>
-            Descripcion del gasto
-            <input
-              value={expenseForm.description}
-              onChange={(event) => setExpenseForm((current) => ({ ...current, description: event.target.value }))}
-              placeholder="Ej. Uber oficina, mercado, restaurante"
-            />
-          </label>
-          <div className="form-grid two">
-            <label>
-              Monto
-              <input
-                type="number"
-                value={expenseForm.amount}
-                onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="85000"
-              />
-            </label>
-            <label>
-              Bolsillo
-              <select
-                value={expenseForm.pocketId}
-                onChange={(event) => setExpenseForm((current) => ({ ...current, pocketId: event.target.value }))}
+        <form className="bank-form movement-form" onSubmit={handleAddExpense}>
+          <section className="movement-form-hero movement-form-hero-expense">
+            <div>
+              <span className="movement-section-label">Salida</span>
+              <strong>Registra el gasto sin perder contexto</strong>
+              <p>Describe, asigna bolsillo y valida la categoria sugerida antes de guardar.</p>
+            </div>
+            <div className="movement-hero-badges">
+              <span>{selectedExpensePocketName}</span>
+              <span>{expenseForm.date}</span>
+            </div>
+          </section>
+
+          <div className="movement-form-layout">
+            <section className="movement-form-card movement-form-main">
+              <div className="movement-field-grid">
+                <label className="movement-field-span-2">
+                  Descripcion del gasto
+                  <input
+                    value={expenseForm.description}
+                    onChange={(event) =>
+                      setExpenseForm((current) => ({ ...current, description: event.target.value }))
+                    }
+                    placeholder="Ej. Uber oficina, mercado, restaurante"
+                  />
+                </label>
+                <label>
+                  Monto
+                  <input
+                    type="number"
+                    value={expenseForm.amount}
+                    onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))}
+                    placeholder="85000"
+                  />
+                </label>
+                <label>
+                  Bolsillo
+                  <select
+                    value={expenseForm.pocketId}
+                    onChange={(event) =>
+                      setExpenseForm((current) => ({ ...current, pocketId: event.target.value }))
+                    }
+                  >
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="movement-field-span-2">
+                  Fecha del movimiento
+                  <input
+                    type="date"
+                    value={expenseForm.date}
+                    onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <aside className="movement-form-card movement-form-side">
+              <div className="smart-box movement-smart-box">
+                <span>Categoria sugerida</span>
+                <strong>{suggestion.category}</strong>
+                <p>Confianza estimada: {Math.round(suggestion.confidence * 100)}%</p>
+                <p>
+                  {suggestion.matches.length > 0
+                    ? `Pistas detectadas: ${suggestion.matches.join(', ')}`
+                    : 'Sin reglas previas suficientes. Esta sugerencia usa coincidencias generales.'}
+                </p>
+              </div>
+            </aside>
+          </div>
+
+          <div className="composer-action-row movement-form-actions">
+            <button type="submit">{expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}</button>
+            {expenseForm.id && (
+              <button
+                type="button"
+                className="secondary-button cancel-action"
+                onClick={() => {
+                  resetExpenseForm()
+                  setOpenComposer(null)
+                }}
               >
-                {state.pockets.map((pocket) => (
-                  <option key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                Cancelar edicion
+              </button>
+            )}
           </div>
-          <label>
-            Fecha del movimiento
-            <input
-              type="date"
-              value={expenseForm.date}
-              onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
-            />
-          </label>
-          <div className="smart-box">
-            <span>Categoria sugerida</span>
-            <strong>{suggestion.category}</strong>
-            <p>Confianza estimada: {Math.round(suggestion.confidence * 100)}%</p>
-            <p>
-              {suggestion.matches.length > 0
-                ? `Pistas detectadas: ${suggestion.matches.join(', ')}`
-                : 'Sin reglas previas suficientes. Esta sugerencia usa coincidencias generales.'}
-            </p>
-          </div>
-          <button type="submit">{expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}</button>
-          {expenseForm.id && (
-            <button
-              type="button"
-              className="secondary-button cancel-action"
-              onClick={() => {
-                resetExpenseForm()
-                setOpenComposer(null)
-              }}
-            >
-              Cancelar edicion
-            </button>
-          )}
         </form>
       )
     }
 
     if (activeModule === 'ingreso') {
+      const selectedIncomePocketName = getPocketName(state.pockets, incomeForm.pocketId)
+
       return (
-        <form className="bank-form" onSubmit={handleAddIncome}>
-          <label>
-            Concepto del ingreso
-            <input
-              value={incomeForm.title}
-              onChange={(event) => setIncomeForm((current) => ({ ...current, title: event.target.value }))}
-              placeholder="Ej. nomina, freelance, devolucion"
-            />
-          </label>
-          <div className="form-grid two">
-            <label>
-              Monto
-              <input
-                type="number"
-                value={incomeForm.amount}
-                onChange={(event) => setIncomeForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="5200000"
-              />
-            </label>
-            <label>
-              Bolsillo destino
-              <select
-                value={incomeForm.pocketId}
-                onChange={(event) => setIncomeForm((current) => ({ ...current, pocketId: event.target.value }))}
-              >
-                {state.pockets.map((pocket) => (
-                  <option key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <form className="bank-form movement-form" onSubmit={handleAddIncome}>
+          <section className="movement-form-hero movement-form-hero-income">
+            <div>
+              <span className="movement-section-label">Entrada</span>
+              <strong>Captura ingresos con trazabilidad</strong>
+              <p>Define el origen del dinero, su destino y si debe repetirse en el tiempo.</p>
+            </div>
+            <div className="movement-hero-badges">
+              <span>{selectedIncomePocketName}</span>
+              <span>{incomeForm.recurring ? 'Recurrente' : 'Unico'}</span>
+            </div>
+          </section>
+
+          <div className="movement-form-layout">
+            <section className="movement-form-card movement-form-main">
+              <div className="movement-field-grid">
+                <label className="movement-field-span-2">
+                  Concepto del ingreso
+                  <input
+                    value={incomeForm.title}
+                    onChange={(event) => setIncomeForm((current) => ({ ...current, title: event.target.value }))}
+                    placeholder="Ej. nomina, freelance, devolucion"
+                  />
+                </label>
+                <label>
+                  Monto
+                  <input
+                    type="number"
+                    value={incomeForm.amount}
+                    onChange={(event) => setIncomeForm((current) => ({ ...current, amount: event.target.value }))}
+                    placeholder="5200000"
+                  />
+                </label>
+                <label>
+                  Bolsillo destino
+                  <select
+                    value={incomeForm.pocketId}
+                    onChange={(event) =>
+                      setIncomeForm((current) => ({ ...current, pocketId: event.target.value }))
+                    }
+                  >
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="movement-field-span-2">
+                  Fecha del movimiento
+                  <input
+                    type="date"
+                    value={incomeForm.date}
+                    onChange={(event) => setIncomeForm((current) => ({ ...current, date: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <aside className="movement-form-card movement-form-side">
+              <label className="movement-toggle-card">
+                <div>
+                  <span className="movement-section-label">Frecuencia</span>
+                  <strong>Ingreso recurrente</strong>
+                  <p>Activalo si este ingreso vuelve mes a mes y quieres mantenerlo identificado.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={incomeForm.recurring}
+                  onChange={(event) =>
+                    setIncomeForm((current) => ({ ...current, recurring: event.target.checked }))
+                  }
+                />
+              </label>
+            </aside>
           </div>
-          <label>
-            Fecha del movimiento
-            <input
-              type="date"
-              value={incomeForm.date}
-              onChange={(event) => setIncomeForm((current) => ({ ...current, date: event.target.value }))}
-            />
-          </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={incomeForm.recurring}
-              onChange={(event) => setIncomeForm((current) => ({ ...current, recurring: event.target.checked }))}
-            />
-            <span>Marcar como ingreso recurrente</span>
-          </label>
-          <button type="submit">{incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}</button>
-          {incomeForm.id && (
-            <button
-              type="button"
-              className="secondary-button cancel-action"
-              onClick={() => {
-                resetIncomeForm()
-                setOpenComposer(null)
-              }}
-            >
-              Cancelar edicion
-            </button>
-          )}
+
+          <div className="composer-action-row movement-form-actions">
+            <button type="submit">{incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}</button>
+            {incomeForm.id && (
+              <button
+                type="button"
+                className="secondary-button cancel-action"
+                onClick={() => {
+                  resetIncomeForm()
+                  setOpenComposer(null)
+                }}
+              >
+                Cancelar edicion
+              </button>
+            )}
+          </div>
         </form>
       )
     }
 
     if (activeModule === 'transferencia') {
+      const fromPocketName = getPocketName(state.pockets, transferForm.fromPocketId)
+      const toPocketName = getPocketName(state.pockets, transferForm.toPocketId)
+
       return (
-        <form className="bank-form" onSubmit={handleAddTransfer}>
-          <div className="form-grid two">
-            <label>
-              Desde bolsillo
-              <select
-                value={transferForm.fromPocketId}
-                onChange={(event) => setTransferForm((current) => ({ ...current, fromPocketId: event.target.value }))}
-              >
-                {state.pockets.map((pocket) => (
-                  <option key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Hacia bolsillo
-              <select
-                value={transferForm.toPocketId}
-                onChange={(event) => setTransferForm((current) => ({ ...current, toPocketId: event.target.value }))}
-              >
-                {state.pockets.map((pocket) => (
-                  <option key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <form className="bank-form movement-form" onSubmit={handleAddTransfer}>
+          <section className="movement-form-hero movement-form-hero-transfer">
+            <div>
+              <span className="movement-section-label">Transferencia</span>
+              <strong>Mueve dinero entre bolsillos</strong>
+              <p>Confirma origen, destino y monto para mantener el balance interno consistente.</p>
+            </div>
+            <div className="movement-hero-badges">
+              <span>{fromPocketName}</span>
+              <span>{toPocketName}</span>
+            </div>
+          </section>
+
+          <div className="movement-form-layout">
+            <section className="movement-form-card movement-form-main">
+              <div className="movement-field-grid">
+                <label>
+                  Desde bolsillo
+                  <select
+                    value={transferForm.fromPocketId}
+                    onChange={(event) =>
+                      setTransferForm((current) => ({ ...current, fromPocketId: event.target.value }))
+                    }
+                  >
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Hacia bolsillo
+                  <select
+                    value={transferForm.toPocketId}
+                    onChange={(event) =>
+                      setTransferForm((current) => ({ ...current, toPocketId: event.target.value }))
+                    }
+                  >
+                    {state.pockets.map((pocket) => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Monto
+                  <input
+                    type="number"
+                    value={transferForm.amount}
+                    onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))}
+                    placeholder="250000"
+                  />
+                </label>
+                <label>
+                  Nota
+                  <input
+                    value={transferForm.note}
+                    onChange={(event) => setTransferForm((current) => ({ ...current, note: event.target.value }))}
+                    placeholder="Ej. provision fin de mes"
+                  />
+                </label>
+                <label className="movement-field-span-2">
+                  Fecha del movimiento
+                  <input
+                    type="date"
+                    value={transferForm.date}
+                    onChange={(event) => setTransferForm((current) => ({ ...current, date: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <aside className="movement-form-card movement-form-side">
+              <div className="movement-transfer-preview">
+                <span className="movement-section-label">Ruta</span>
+                <strong>{fromPocketName}</strong>
+                <p>sale desde el bolsillo origen</p>
+                <div className="movement-transfer-arrow">hacia</div>
+                <strong>{toPocketName}</strong>
+                <p>entra al bolsillo destino</p>
+              </div>
+            </aside>
           </div>
-          <div className="form-grid two">
-            <label>
-              Monto
-              <input
-                type="number"
-                value={transferForm.amount}
-                onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="250000"
-              />
-            </label>
-            <label>
-              Nota
-              <input
-                value={transferForm.note}
-                onChange={(event) => setTransferForm((current) => ({ ...current, note: event.target.value }))}
-                placeholder="Ej. provision fin de mes"
-              />
-            </label>
-          </div>
-          <label>
-            Fecha del movimiento
-            <input
-              type="date"
-              value={transferForm.date}
-              onChange={(event) => setTransferForm((current) => ({ ...current, date: event.target.value }))}
-            />
-          </label>
-          <button type="submit">
-            {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
-          </button>
-          {transferForm.id && (
-            <button
-              type="button"
-              className="secondary-button cancel-action"
-              onClick={() => {
-                resetTransferForm()
-                setOpenComposer(null)
-              }}
-            >
-              Cancelar edicion
+
+          <div className="composer-action-row movement-form-actions">
+            <button type="submit">
+              {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
             </button>
-          )}
+            {transferForm.id && (
+              <button
+                type="button"
+                className="secondary-button cancel-action"
+                onClick={() => {
+                  resetTransferForm()
+                  setOpenComposer(null)
+                }}
+              >
+                Cancelar edicion
+              </button>
+            )}
+          </div>
         </form>
       )
     }
@@ -3115,6 +3239,12 @@ function App() {
             label="Registrar"
             title={moduleLabels[activeModule]}
             description={getModuleSummary(activeModule)}
+            hideHeader
+            hideHeaderCopy
+            panelClassName="movement-composer-panel"
+            toolbarClassName="movement-composer-toolbar"
+            bodyClassName="movement-composer-body"
+            toolbarContentPosition="body"
             onClose={() => {
               resetExpenseForm()
               resetIncomeForm()
@@ -3122,18 +3252,38 @@ function App() {
               setOpenComposer(null)
             }}
             toolbarContent={
-              <div className="module-segmented">
-                {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
-                  <button
-                    key={module}
-                    type="button"
-                    className={module === activeModule ? 'segment active' : 'segment'}
-                    onClick={() => setActiveModule(module)}
-                  >
-                    {moduleLabels[module]}
-                  </button>
-                ))}
-              </div>
+              <section className="movement-composer-switcher-card">
+                <button
+                  type="button"
+                  className="icon-action-button close-icon-button movement-composer-close"
+                  aria-label="Cerrar ventana"
+                  title="Cerrar (Esc)"
+                  onClick={() => {
+                    resetExpenseForm()
+                    resetIncomeForm()
+                    resetTransferForm()
+                    setOpenComposer(null)
+                  }}
+                >
+                  ×
+                </button>
+                <div className="movement-composer-switcher-copy">
+                  <span className="movement-section-label">Tipo de registro</span>
+                  <p>Cambia entre gasto, ingreso o transferencia sin salir del flujo.</p>
+                </div>
+                <div className="module-segmented movement-composer-segmented">
+                  {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
+                    <button
+                      key={module}
+                      type="button"
+                      className={module === activeModule ? 'segment active' : 'segment'}
+                      onClick={() => setActiveModule(module)}
+                    >
+                      {moduleLabels[module]}
+                    </button>
+                  ))}
+                </div>
+              </section>
             }
           >
             {renderActiveForm()}
@@ -4658,23 +4808,24 @@ function App() {
       </section>
 
       <div className="mobile-menu-shell">
-        {isMobileMenuOpen && (
+        {isMobileMenuExpanded && (
           <button
             type="button"
-            className="mobile-menu-backdrop"
+            className={isMobileMenuOpen ? 'mobile-menu-backdrop open' : 'mobile-menu-backdrop'}
             aria-label="Cerrar navegacion"
             onClick={closeMobileMenu}
           />
         )}
 
-        <div className={isMobileMenuOpen ? 'mobile-menu-panel open' : 'mobile-menu-panel'}>
+        <div className={isMobileMenuExpanded ? 'mobile-menu-panel open' : 'mobile-menu-panel'}>
           <button
             type="button"
             className={
               [
                 'mobile-menu-trigger',
-                isMobileMenuOpen ? 'active' : '',
-                !isMobileMenuOpen && isMobileMenuCompact ? 'compact' : '',
+                isMobileMenuExpanded ? 'active' : '',
+                isMobileMenuClosing ? 'closing' : '',
+                !isMobileMenuExpanded && isMobileMenuCompact ? 'compact' : '',
               ]
                 .filter(Boolean)
                 .join(' ')
@@ -4695,13 +4846,16 @@ function App() {
               <strong>{viewLabels[activeView]}</strong>
               <span>Navegacion y accesos</span>
             </span>
-            <span className={isMobileMenuOpen ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
+            <span className={isMobileMenuExpanded ? 'mobile-menu-trigger-icon open' : 'mobile-menu-trigger-icon'}>
               <LuMenu />
             </span>
           </button>
 
-          {isMobileMenuOpen && (
-            <div id="mobile-finance-menu" className="mobile-menu-sheet open">
+          {isMobileMenuExpanded && (
+            <div
+              id="mobile-finance-menu"
+              className={isMobileMenuOpen ? 'mobile-menu-sheet open' : 'mobile-menu-sheet closing'}
+            >
               <div className="mobile-menu-head">
                 <div className="mobile-menu-head-copy">
                   <span className="micro-label">Navegacion</span>
