@@ -1178,6 +1178,24 @@
   background: white;
 }
 
+.bank-form input[type='date'] {
+  min-height: 54px;
+  line-height: 1.2;
+  font-size: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.bank-form input[type='date']::-webkit-date-and-time-value {
+  min-height: 1.2em;
+  text-align: left;
+}
+
+.bank-form input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.78;
+  cursor: pointer;
+}
+
 .bank-form input[type='checkbox'] {
   width: 18px;
   height: 18px;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react'
+import { useEffect, useRef, type ReactNode, type TouchEvent } from 'react'
 
 type FullscreenComposerProps = {
   isOpen: boolean
@@ -18,8 +18,6 @@ type FullscreenComposerProps = {
 }
 
 export function FullscreenComposer(props: FullscreenComposerProps) {
-  const [swipeOffset, setSwipeOffset] = useState(0)
-  const [isSwiping, setIsSwiping] = useState(false)
   const touchStateRef = useRef({
     startX: 0,
     startY: 0,
@@ -58,13 +56,6 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     }
   }, [props.isOpen, props.onClose])
 
-  useEffect(() => {
-    if (!props.isOpen) {
-      setSwipeOffset(0)
-      setIsSwiping(false)
-    }
-  }, [props.isOpen])
-
   if (!props.isOpen) return null
 
   const panelClassName = [
@@ -86,7 +77,6 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     .join(' ')
   const bodyClassName = ['fullscreen-composer-body', props.bodyClassName].filter(Boolean).join(' ')
   const toolbarInBody = props.toolbarContentPosition === 'body'
-  const swipeProgress = Math.min(1, Math.abs(swipeOffset) / 180)
 
   function resetSwipeState() {
     touchStateRef.current = {
@@ -96,13 +86,16 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
       tracking: false,
       horizontal: false,
     }
-    setSwipeOffset(0)
-    setIsSwiping(false)
   }
 
   function handleTouchStart(event: TouchEvent<HTMLElement>) {
     if (!props.enableSwipeClose) return
     const touch = event.touches[0]
+    const edgeSwipeZone = 28
+    if (touch.clientX > edgeSwipeZone) {
+      resetSwipeState()
+      return
+    }
     touchStateRef.current = {
       startX: touch.clientX,
       startY: touch.clientY,
@@ -126,16 +119,13 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
         return
       }
       touchStateRef.current.horizontal = true
-      setIsSwiping(true)
     }
 
     if (event.cancelable) {
       event.preventDefault()
     }
 
-    const nextOffset = Math.min(180, Math.max(0, deltaX))
-    touchStateRef.current.deltaX = nextOffset
-    setSwipeOffset(nextOffset)
+    touchStateRef.current.deltaX = Math.min(180, Math.max(0, deltaX))
   }
 
   function handleTouchEnd() {
@@ -160,15 +150,6 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
-        style={
-          props.enableSwipeClose
-            ? {
-                transform: `translate3d(${swipeOffset}px, 0, 0)`,
-                opacity: 1 - swipeProgress * 0.18,
-                transition: isSwiping ? 'none' : 'transform 220ms ease, opacity 220ms ease',
-              }
-            : undefined
-        }
       >
         {!props.hideHeader && (
           <div className={toolbarClassName}>
