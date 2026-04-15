@@ -118,6 +118,9 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
 
   function handleTouchStart(event: TouchEvent<HTMLElement>) {
     if (!props.enableSwipeClose) return
+    if (event.cancelable) {
+      event.preventDefault()
+    }
     const touch = event.touches[0]
     touchStateRef.current = {
       startX: touch.clientX,

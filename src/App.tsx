@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   LuArrowLeftRight,
+  LuCalendar,
   LuChevronDown,
   LuCircleDollarSign,
   LuEye,
@@ -66,6 +67,13 @@ const dateFormatter = new Intl.DateTimeFormat('es-CO', {
 
 function formatDateISO(date: Date) {
   return date.toISOString().slice(0, 10)
+}
+
+function formatDateInputDisplay(value: string) {
+  if (!value) return 'Selecciona una fecha'
+  const [year, month, day] = value.split('-')
+  if (!year || !month || !day) return value
+  return `${day}/${month}/${year}`
 }
 
 function getMonthKeyFromOffset(monthKey: string, offset: number) {
@@ -529,6 +537,9 @@ function App() {
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
   const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
+  const expenseDateInputRef = useRef<HTMLInputElement | null>(null)
+  const incomeDateInputRef = useRef<HTMLInputElement | null>(null)
+  const transferDateInputRef = useRef<HTMLInputElement | null>(null)
   const [fixedPaymentDraft, setFixedPaymentDraft] = useState<{
     fixedId: string
     pocketId: string
@@ -2016,6 +2027,13 @@ function App() {
   }
 
   function renderActiveForm() {
+    function openDatePicker(input: HTMLInputElement | null) {
+      if (!input) return
+      input.focus()
+      ;(input as HTMLInputElement & { showPicker?: () => void }).showPicker?.()
+      input.click()
+    }
+
     if (activeModule === 'gasto') {
       const selectedExpensePocketName = getPocketName(state.pockets, expenseForm.pocketId)
       const selectedCategoryConfidence = getCategoryConfidenceForSelection(
@@ -2069,11 +2087,21 @@ function App() {
                 </label>
                 <label className="movement-field-span-2">
                   Fecha del movimiento
-                  <input
-                    type="date"
-                    value={expenseForm.date}
-                    onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
-                  />
+                  <div className="date-input-shell">
+                    <div className="date-input-display" aria-hidden="true">
+                      <span>{formatDateInputDisplay(expenseForm.date)}</span>
+                      <LuCalendar />
+                    </div>
+                    <input
+                      ref={expenseDateInputRef}
+                      className="date-input-native-overlay"
+                      type="date"
+                      value={expenseForm.date}
+                      aria-label="Fecha del movimiento"
+                      onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
+                      onClick={() => openDatePicker(expenseDateInputRef.current)}
+                    />
+                  </div>
                 </label>
                 <div className="movement-field-span-2 expense-category-card">
                   <label className="expense-category-select">
@@ -2228,11 +2256,21 @@ function App() {
                 </label>
                 <label className="movement-field-span-2">
                   Fecha del movimiento
-                  <input
-                    type="date"
-                    value={incomeForm.date}
-                    onChange={(event) => setIncomeForm((current) => ({ ...current, date: event.target.value }))}
-                  />
+                  <div className="date-input-shell">
+                    <div className="date-input-display" aria-hidden="true">
+                      <span>{formatDateInputDisplay(incomeForm.date)}</span>
+                      <LuCalendar />
+                    </div>
+                    <input
+                      ref={incomeDateInputRef}
+                      className="date-input-native-overlay"
+                      type="date"
+                      value={incomeForm.date}
+                      aria-label="Fecha del movimiento"
+                      onChange={(event) => setIncomeForm((current) => ({ ...current, date: event.target.value }))}
+                      onClick={() => openDatePicker(incomeDateInputRef.current)}
+                    />
+                  </div>
                 </label>
               </div>
             </section>
@@ -2351,11 +2389,21 @@ function App() {
                 </label>
                 <label className="movement-field-span-2">
                   Fecha del movimiento
-                  <input
-                    type="date"
-                    value={transferForm.date}
-                    onChange={(event) => setTransferForm((current) => ({ ...current, date: event.target.value }))}
-                  />
+                  <div className="date-input-shell">
+                    <div className="date-input-display" aria-hidden="true">
+                      <span>{formatDateInputDisplay(transferForm.date)}</span>
+                      <LuCalendar />
+                    </div>
+                    <input
+                      ref={transferDateInputRef}
+                      className="date-input-native-overlay"
+                      type="date"
+                      value={transferForm.date}
+                      aria-label="Fecha del movimiento"
+                      onChange={(event) => setTransferForm((current) => ({ ...current, date: event.target.value }))}
+                      onClick={() => openDatePicker(transferDateInputRef.current)}
+                    />
+                  </div>
                 </label>
               </div>
             </section>
