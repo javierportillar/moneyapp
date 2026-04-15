@@ -11,7 +11,7 @@
     sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  --bg-canvas: #0e121a;
+  --bg-canvas: #172033;
   --bg-card: #181d2a;
   --bg-card-high: #1f2536;
   --bg-raised: #1a202d;
@@ -60,12 +60,19 @@
 html {
   scroll-behavior: smooth;
   touch-action: manipulation;
+  background-color: var(--bg-canvas);
 }
 
 body {
   margin: 0;
+  padding: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
   min-width: 320px;
-  background: var(--bg-canvas);
+  background-color: var(--bg-canvas);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body,
@@ -87,6 +94,8 @@ a {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg-canvas);
 }
 
 h1,

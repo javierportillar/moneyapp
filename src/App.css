@@ -1,21 +1,26 @@
-.banking-app {
+html, body {
+  background-color: var(--bg-canvas);
+  margin: 0;
+  padding: 0;
   min-height: 100vh;
+}
+
+.banking-app {
+  min-height: 100dvh;
+  min-height: 100vh;
+  padding-top: env(safe-area-inset-top);
   display: grid;
   grid-template-columns: 280px 1fr;
   overflow-x: clip;
-  background:
-    radial-gradient(circle at top left, rgba(15, 23, 42, 0.28), transparent 24%),
-    linear-gradient(180deg, #eef3f8, #e9eef5);
+  background: var(--bg-canvas);
 }
 
 .auth-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background:
-    radial-gradient(circle at top left, rgba(15, 23, 42, 0.22), transparent 24%),
-    linear-gradient(180deg, #eef3f8, #e9eef5);
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px 24px;
+  background: #172033;
 }
 
 .auth-panel {
@@ -609,8 +614,9 @@
   border-radius: 0;
   border: none;
   box-shadow: none;
-  padding: 32px 40px;
-  background: linear-gradient(180deg, #141c2e 0%, #0f1624 100%);
+  padding: calc(env(safe-area-inset-top, 0px) + 32px) 40px 32px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
+  background: var(--bg-canvas);
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -3083,10 +3089,12 @@
 .banking-app,
 .auth-shell {
   position: relative;
-  background:
-    radial-gradient(circle at top left, rgba(13, 92, 99, 0.12), transparent 22%),
-    radial-gradient(circle at top right, rgba(201, 108, 58, 0.14), transparent 24%),
-    linear-gradient(180deg, #f7f3eb 0%, #efe8dd 52%, #e8e1d5 100%);
+  background: var(--bg-canvas);
+}
+
+.banking-app::before,
+.auth-shell::before {
+  content: none;
 }
 
 .banking-app::before,
@@ -3255,20 +3263,16 @@
 .topbar-copy {
   padding: 28px 30px;
   border-radius: 30px;
-  background:
-    radial-gradient(circle at top left, rgba(13, 92, 99, 0.12), transparent 28%),
-    linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(252, 249, 243, 0.9));
-  border: 1px solid rgba(108, 92, 67, 0.14);
-  box-shadow:
-    0 24px 60px rgba(48, 39, 24, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  background: var(--bg-card);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
 }
 
 .topbar-copy h1 {
   margin: 10px 0 10px;
   font-size: clamp(2.2rem, 3vw, 3.6rem);
   line-height: 0.95;
-  color: #142033;
+  color: var(--title);
 }
 
 .eyebrow,
@@ -4025,6 +4029,7 @@
 
 @media (max-width: 820px) {
   .banking-app {
+    padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: 112px;
   }
 
