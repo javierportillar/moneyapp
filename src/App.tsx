@@ -82,6 +82,25 @@ function getMonthKeyFromOffset(monthKey: string, offset: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
+function formatMonthName(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map(Number)
+  const date = new Date(year, month - 1, 1)
+  return date.toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
+}
+
+function getMonthsImpacted(dateStr: string, currentMonthKey: string): string[] {
+  const monthKey = dateStr.slice(0, 7)
+  const months: string[] = []
+  let current = monthKey
+  
+  while (current <= currentMonthKey) {
+    months.push(current)
+    current = getMonthKeyFromOffset(current, 1)
+  }
+  
+  return months
+}
+
 function normalize(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
@@ -1111,12 +1130,9 @@ function App() {
     }, {})
   }, [state.debtPayments])
 
-  const currentMonthClosed = state.monthClosures.some((item) => item.monthKey === currentMonthKey)
-  const previousClosure = state.monthClosures.find((item) => item.monthKey === previousMonthKey)
-
   const monthOverMonth = useMemo(() => {
-    const previousIncome = previousClosure?.income ?? totals.previousIncomes
-    const previousExpense = previousClosure?.expense ?? totals.previousExpenses
+    const previousIncome = totals.previousIncomes
+    const previousExpense = totals.previousExpenses
     const previousNet = previousIncome - previousExpense
     const currentNet = totals.netFlow
     const netDelta = currentNet - previousNet
@@ -1128,7 +1144,7 @@ function App() {
       currentNet,
       netDelta,
     }
-  }, [previousClosure?.expense, previousClosure?.income, totals.netFlow, totals.previousExpenses, totals.previousIncomes])
+  }, [totals.netFlow, totals.previousExpenses, totals.previousIncomes])
 
   const coachingMessage = useMemo(() => {
     if (fixedStatus.overdue.length > 0) {
@@ -1357,13 +1373,39 @@ function App() {
   }
 
   function handleDeleteMovement(kind: MovementKind, movementId: string) {
-    if (!window.confirm('Este movimiento se eliminara de forma permanente.')) return
+    let movementDate = today
+    let isRetroactive = false
+
+    if (kind === 'gasto') {
+      const expense = state.expenses.find((item) => item.id === movementId)
+      if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return
+      movementDate = expense.date
+      isRetroactive = expense.date.slice(0, 7) < currentMonthKey
+    } else if (kind === 'ingreso') {
+      const income = state.incomes.find((item) => item.id === movementId)
+      if (income) {
+        movementDate = income.date
+        isRetroactive = income.date.slice(0, 7) < currentMonthKey
+      }
+    } else {
+      const transfer = state.transfers.find((item) => item.id === movementId)
+      if (transfer) {
+        movementDate = transfer.date
+        isRetroactive = transfer.date.slice(0, 7) < currentMonthKey
+      }
+    }
+
+    let confirmMsg = 'Este movimiento se eliminara de forma permanente.'
+    if (isRetroactive) {
+      const monthsImpacted = getMonthsImpacted(movementDate, currentMonthKey)
+      const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
+      confirmMsg = `Este movimiento pertenece a ${formatMonthName(movementDate.slice(0, 7))}. Si lo eliminas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
+    }
+
+    if (!window.confirm(confirmMsg)) return
 
     setState((current) => {
       if (kind === 'gasto') {
-        const expense = current.expenses.find((item) => item.id === movementId)
-        if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return current
-
         return {
           ...current,
           expenses: current.expenses.filter((item) => item.id !== movementId),
@@ -1393,56 +1435,71 @@ function App() {
     const numericAmount = Number(expenseForm.amount)
     if (!expenseForm.description.trim() || numericAmount <= 0) return
 
-    setState((current) => {
-      const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
-      const selectedCategory = expenseForm.category
-      const selectedConfidence = getCategoryConfidenceForSelection(
-        selectedCategory,
-        suggestion.category,
-        suggestion.confidence,
-      )
-      const learnedKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
-      const expense: Expense = {
-        id: expenseForm.id || crypto.randomUUID(),
-        description: expenseForm.description.trim(),
-        amount: numericAmount,
-        pocketId: expenseForm.pocketId,
-        date: expenseForm.date || currentExpense?.date || today,
-        source: currentExpense?.source ?? 'manual',
-        category: selectedCategory,
-        confidence: selectedConfidence,
-      }
+    const expenseDate = expenseForm.date || today
+    const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
 
-      const learningRules = [...current.learningRules]
-      learnedKeywords.forEach((keyword) => {
-        const existingIndex = learningRules.findIndex((rule) => rule.keyword === keyword)
-        if (existingIndex === -1) {
-          learningRules.push({ keyword, category: selectedCategory, hits: 1 })
-          return
+    const executeAddExpense = () => {
+      setState((current) => {
+        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
+        const selectedCategory = expenseForm.category
+        const selectedConfidence = getCategoryConfidenceForSelection(
+          selectedCategory,
+          suggestion.category,
+          suggestion.confidence,
+        )
+        const learnedKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
+        const expense: Expense = {
+          id: expenseForm.id || crypto.randomUUID(),
+          description: expenseForm.description.trim(),
+          amount: numericAmount,
+          pocketId: expenseForm.pocketId,
+          date: expenseDate,
+          source: currentExpense?.source ?? 'manual',
+          category: selectedCategory,
+          confidence: selectedConfidence,
         }
 
-        const existingRule = learningRules[existingIndex]
-        learningRules[existingIndex] = {
-          keyword,
-          category: selectedCategory,
-          hits:
-            existingRule.category === selectedCategory
-              ? existingRule.hits + 1
-              : Math.max(1, Math.round(existingRule.hits * 0.6)) + 1,
+        const learningRules = [...current.learningRules]
+        learnedKeywords.forEach((keyword) => {
+          const existingIndex = learningRules.findIndex((rule) => rule.keyword === keyword)
+          if (existingIndex === -1) {
+            learningRules.push({ keyword, category: selectedCategory, hits: 1 })
+            return
+          }
+
+          const existingRule = learningRules[existingIndex]
+          learningRules[existingIndex] = {
+            keyword,
+            category: selectedCategory,
+            hits:
+              existingRule.category === selectedCategory
+                ? existingRule.hits + 1
+                : Math.max(1, Math.round(existingRule.hits * 0.6)) + 1,
+          }
+        })
+
+        return {
+          ...current,
+          learningRules,
+          expenses: expenseForm.id
+            ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
+            : [expense, ...current.expenses],
         }
       })
 
-      return {
-        ...current,
-        learningRules,
-        expenses: expenseForm.id
-          ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
-          : [expense, ...current.expenses],
-      }
-    })
+      resetExpenseForm()
+      setOpenComposer(null)
+    }
 
-    resetExpenseForm()
-    setOpenComposer(null)
+    if (isRetroactive) {
+      const monthsImpacted = getMonthsImpacted(expenseDate, currentMonthKey)
+      const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
+      const confirmMsg = `Este movimiento pertenece a ${formatMonthName(expenseDate.slice(0, 7))}. Si lo guardas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
+      
+      if (!window.confirm(confirmMsg)) return
+    }
+
+    executeAddExpense()
   }
 
   function handleAddIncome(event: React.FormEvent<HTMLFormElement>) {
@@ -1450,27 +1507,41 @@ function App() {
     const numericAmount = Number(incomeForm.amount)
     if (!incomeForm.title.trim() || numericAmount <= 0) return
 
-    setState((current) => {
-      const currentIncome = current.incomes.find((item) => item.id === incomeForm.id)
-      const income: Income = {
-        id: incomeForm.id || crypto.randomUUID(),
-        title: incomeForm.title.trim(),
-        amount: numericAmount,
-        pocketId: incomeForm.pocketId,
-        date: incomeForm.date || currentIncome?.date || today,
-        recurring: incomeForm.recurring,
-      }
+    const incomeDate = incomeForm.date || today
+    const isRetroactive = incomeDate.slice(0, 7) < currentMonthKey
 
-      return {
-        ...current,
-        incomes: incomeForm.id
-          ? current.incomes.map((item) => (item.id === incomeForm.id ? income : item))
-          : [income, ...current.incomes],
-      }
-    })
+    const executeAddIncome = () => {
+      setState((current) => {
+        const income: Income = {
+          id: incomeForm.id || crypto.randomUUID(),
+          title: incomeForm.title.trim(),
+          amount: numericAmount,
+          pocketId: incomeForm.pocketId,
+          date: incomeDate,
+          recurring: incomeForm.recurring,
+        }
 
-    resetIncomeForm()
-    setOpenComposer(null)
+        return {
+          ...current,
+          incomes: incomeForm.id
+            ? current.incomes.map((item) => (item.id === incomeForm.id ? income : item))
+            : [income, ...current.incomes],
+        }
+      })
+
+      resetIncomeForm()
+      setOpenComposer(null)
+    }
+
+    if (isRetroactive) {
+      const monthsImpacted = getMonthsImpacted(incomeDate, currentMonthKey)
+      const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
+      const confirmMsg = `Este movimiento pertenece a ${formatMonthName(incomeDate.slice(0, 7))}. Si lo guardas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
+      
+      if (!window.confirm(confirmMsg)) return
+    }
+
+    executeAddIncome()
   }
 
   function handleAddTransfer(event: React.FormEvent<HTMLFormElement>) {
@@ -1485,27 +1556,41 @@ function App() {
       return
     }
 
-    setState((current) => {
-      const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
-      const transfer: Transfer = {
-        id: transferForm.id || crypto.randomUUID(),
-        fromPocketId: transferForm.fromPocketId,
-        toPocketId: transferForm.toPocketId,
-        amount: numericAmount,
-        date: transferForm.date || currentTransfer?.date || today,
-        note: transferForm.note.trim(),
-      }
+    const transferDate = transferForm.date || today
+    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
 
-      return {
-        ...current,
-        transfers: transferForm.id
-          ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
-          : [transfer, ...current.transfers],
-      }
-    })
+    const executeAddTransfer = () => {
+      setState((current) => {
+        const transfer: Transfer = {
+          id: transferForm.id || crypto.randomUUID(),
+          fromPocketId: transferForm.fromPocketId,
+          toPocketId: transferForm.toPocketId,
+          amount: numericAmount,
+          date: transferDate,
+          note: transferForm.note.trim(),
+        }
 
-    resetTransferForm()
-    setOpenComposer(null)
+        return {
+          ...current,
+          transfers: transferForm.id
+            ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
+            : [transfer, ...current.transfers],
+        }
+      })
+
+      resetTransferForm()
+      setOpenComposer(null)
+    }
+
+    if (isRetroactive) {
+      const monthsImpacted = getMonthsImpacted(transferDate, currentMonthKey)
+      const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
+      const confirmMsg = `Este movimiento pertenece a ${formatMonthName(transferDate.slice(0, 7))}. Si lo guardas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
+      
+      if (!window.confirm(confirmMsg)) return
+    }
+
+    executeAddTransfer()
   }
 
   function handleAddFixedExpense(event: React.FormEvent<HTMLFormElement>) {
@@ -1654,29 +1739,6 @@ function App() {
         item.id === fixedId ? { ...item, active: !item.active } : item,
       ),
     }))
-  }
-
-  function handleCloseMonth() {
-    setState((current) => {
-      if (current.monthClosures.some((item) => item.monthKey === currentMonthKey)) return current
-
-      return {
-        ...current,
-        monthClosures: [
-          {
-            monthKey: currentMonthKey,
-            closedAt: today,
-            income: totals.totalIncomes,
-            expense: totals.totalExpenses,
-            netFlow: totals.netFlow,
-            pocketBalance: totals.pocketBalance,
-            pendingDebt: totals.pendingDebt,
-            pendingFixed: totals.pendingFixed,
-          },
-          ...current.monthClosures,
-        ],
-      }
-    })
   }
 
   function handleAddDebt(event: React.FormEvent<HTMLFormElement>) {
@@ -2951,11 +3013,6 @@ function App() {
             title="Flujo diario del mes"
             collapsed={isSectionCollapsed('summary-flujo-diario')}
             onToggle={() => toggleSection('summary-flujo-diario')}
-            actions={
-              <button type="button" className="action-trigger ghost" onClick={handleCloseMonth}>
-                {currentMonthClosed ? 'Mes cerrado' : 'Cerrar mes'}
-              </button>
-            }
           >
             <div className="daily-trend-board">
               {summaryAnalytics.dailyTrend.map((item) => (
