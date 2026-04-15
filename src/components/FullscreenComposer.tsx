@@ -21,6 +21,7 @@ type FullscreenComposerProps = {
 export function FullscreenComposer(props: FullscreenComposerProps) {
   const panelRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const scrollLockRef = useRef(0)
   const touchStateRef = useRef({
     startX: 0,
     startY: 0,
@@ -34,11 +35,18 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
 
     const previousBodyOverflow = document.body.style.overflow
     const previousBodyTouchAction = document.body.style.touchAction
+    const previousBodyPosition = document.body.style.position
+    const previousBodyTop = document.body.style.top
+    const previousBodyWidth = document.body.style.width
     const previousHtmlOverflow = document.documentElement.style.overflow
     const previousHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior
 
+    scrollLockRef.current = window.scrollY
     document.body.style.overflow = 'hidden'
     document.body.style.touchAction = 'none'
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollLockRef.current}px`
+    document.body.style.width = '100%'
     document.documentElement.style.overflow = 'hidden'
     document.documentElement.style.overscrollBehavior = 'none'
 
@@ -53,13 +61,15 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     return () => {
       document.body.style.overflow = previousBodyOverflow
       document.body.style.touchAction = previousBodyTouchAction
+      document.body.style.position = previousBodyPosition
+      document.body.style.top = previousBodyTop
+      document.body.style.width = previousBodyWidth
       document.documentElement.style.overflow = previousHtmlOverflow
       document.documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior
+      window.scrollTo(0, scrollLockRef.current)
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [props.isOpen, props.onClose])
-
-  if (!props.isOpen) return null
 
   useEffect(() => {
     if (!props.isOpen) return
@@ -73,6 +83,8 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     const frame = window.requestAnimationFrame(resetScroll)
     return () => window.cancelAnimationFrame(frame)
   }, [props.isOpen, props.title])
+
+  if (!props.isOpen) return null
 
   const panelClassName = [
     'fullscreen-composer-panel',
