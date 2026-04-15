@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode, type TouchEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 type FullscreenComposerProps = {
   isOpen: boolean
@@ -18,6 +19,8 @@ type FullscreenComposerProps = {
 }
 
 export function FullscreenComposer(props: FullscreenComposerProps) {
+  const panelRef = useRef<HTMLElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const touchStateRef = useRef({
     startX: 0,
     startY: 0,
@@ -57,6 +60,19 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
   }, [props.isOpen, props.onClose])
 
   if (!props.isOpen) return null
+
+  useEffect(() => {
+    if (!props.isOpen) return
+
+    const resetScroll = () => {
+      panelRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+    }
+
+    resetScroll()
+    const frame = window.requestAnimationFrame(resetScroll)
+    return () => window.cancelAnimationFrame(frame)
+  }, [props.isOpen, props.title])
 
   const panelClassName = [
     'fullscreen-composer-panel',
@@ -136,7 +152,7 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     resetSwipeState()
   }
 
-  return (
+  const content = (
     <div className="fullscreen-composer-shell">
       <div className="fullscreen-composer-backdrop" onClick={props.onClose} />
       {props.enableSwipeClose && (
@@ -149,7 +165,7 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
           aria-hidden="true"
         />
       )}
-      <section className={panelClassName}>
+      <section ref={panelRef} className={panelClassName}>
         {!props.hideHeader && (
           <div className={toolbarClassName}>
             {!props.hideHeaderCopy && (
@@ -171,11 +187,13 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
           </div>
         )}
         {!toolbarInBody && props.toolbarContent}
-        <div className={bodyClassName}>
+        <div ref={bodyRef} className={bodyClassName}>
           {toolbarInBody && props.toolbarContent}
           {props.children}
         </div>
       </section>
     </div>
   )
+
+  return createPortal(content, document.body)
 }

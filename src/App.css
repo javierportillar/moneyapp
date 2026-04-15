@@ -1184,6 +1184,8 @@
   border-radius: 16px;
   padding: 14px 16px;
   font: inherit;
+  font-size: 16px;
+  line-height: 1.2;
   color: var(--title);
   background: white;
 }
@@ -1216,6 +1218,19 @@
 .bank-form input[type='date']::-webkit-calendar-picker-indicator {
   opacity: 0.78;
   cursor: pointer;
+}
+
+@supports (-webkit-touch-callout: none) {
+  .bank-form input[type='date'] {
+    appearance: auto;
+    -webkit-appearance: auto;
+    padding-right: 14px;
+  }
+
+  .bank-form input[type='date']::-webkit-date-and-time-value {
+    display: inline-block;
+    min-height: auto;
+  }
 }
 
 .bank-form input[type='checkbox'] {
