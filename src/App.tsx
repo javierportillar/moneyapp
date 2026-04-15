@@ -78,6 +78,56 @@ function normalize(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
 
+const learningStopWords = new Set([
+  'para',
+  'como',
+  'pero',
+  'porque',
+  'desde',
+  'hasta',
+  'entre',
+  'sobre',
+  'gasto',
+  'pago',
+  'compra',
+  'compras',
+  'casa',
+  'banco',
+  'tarjeta',
+  'cuenta',
+  'este',
+  'esta',
+  'estos',
+  'estas',
+  'cada',
+  'otro',
+  'otra',
+  'otros',
+  'otras',
+  'general',
+  'movimiento',
+])
+
+function deriveLearningKeywords(description: string, matches: string[]) {
+  const normalizedMatches = matches.map(normalize).filter(Boolean)
+  const normalizedWords = normalize(description)
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4 && !learningStopWords.has(word))
+
+  return [...new Set([...normalizedMatches, ...normalizedWords])].slice(0, 4)
+}
+
+function getCategoryConfidenceForSelection(selectedCategory: Category, suggestedCategory: Category, confidence: number) {
+  if (selectedCategory === suggestedCategory) return confidence
+  return Math.max(0.32, Math.min(0.72, confidence * 0.58))
+}
+
+function getConfidenceLabel(confidence: number) {
+  if (confidence >= 0.8) return 'Alta'
+  if (confidence >= 0.6) return 'Media'
+  return 'Baja'
+}
+
 function predictCategory(description: string, rules: LearningRule[]) {
   const text = normalize(description)
   const scores = new Map<Category, number>()
@@ -419,6 +469,8 @@ function App() {
     amount: '',
     pocketId: initialState.pockets[0].id,
     date: today,
+    category: 'Otros' as Category,
+    categorySource: 'suggested' as 'suggested' | 'manual',
   })
   const [incomeForm, setIncomeForm] = useState({
     id: '',
@@ -565,6 +617,18 @@ function App() {
     () => predictCategory(expenseForm.description || 'movimiento general', state.learningRules),
     [expenseForm.description, state.learningRules],
   )
+
+  useEffect(() => {
+    setExpenseForm((current) => {
+      if (current.categorySource === 'manual') return current
+      if (current.category === suggestion.category) return current
+      return {
+        ...current,
+        category: suggestion.category,
+        categorySource: 'suggested',
+      }
+    })
+  }, [suggestion.category])
   const previousMonthKey = getMonthKeyFromOffset(currentMonthKey, -1)
 
   const monthExpenses = useMemo(
@@ -1120,6 +1184,8 @@ function App() {
       amount: '',
       pocketId: initialState.pockets[0].id,
       date: today,
+      category: 'Otros',
+      categorySource: 'suggested',
     })
   }
 
@@ -1245,6 +1311,8 @@ function App() {
         amount: String(expense.amount),
         pocketId: expense.pocketId,
         date: expense.date,
+        category: expense.category,
+        categorySource: 'manual',
       })
       return
     }
@@ -1316,6 +1384,13 @@ function App() {
 
     setState((current) => {
       const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
+      const selectedCategory = expenseForm.category
+      const selectedConfidence = getCategoryConfidenceForSelection(
+        selectedCategory,
+        suggestion.category,
+        suggestion.confidence,
+      )
+      const learnedKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
       const expense: Expense = {
         id: expenseForm.id || crypto.randomUUID(),
         description: expenseForm.description.trim(),
@@ -1323,12 +1398,32 @@ function App() {
         pocketId: expenseForm.pocketId,
         date: expenseForm.date || currentExpense?.date || today,
         source: currentExpense?.source ?? 'manual',
-        category: suggestion.category,
-        confidence: suggestion.confidence,
+        category: selectedCategory,
+        confidence: selectedConfidence,
       }
+
+      const learningRules = [...current.learningRules]
+      learnedKeywords.forEach((keyword) => {
+        const existingIndex = learningRules.findIndex((rule) => rule.keyword === keyword)
+        if (existingIndex === -1) {
+          learningRules.push({ keyword, category: selectedCategory, hits: 1 })
+          return
+        }
+
+        const existingRule = learningRules[existingIndex]
+        learningRules[existingIndex] = {
+          keyword,
+          category: selectedCategory,
+          hits:
+            existingRule.category === selectedCategory
+              ? existingRule.hits + 1
+              : Math.max(1, Math.round(existingRule.hits * 0.6)) + 1,
+        }
+      })
 
       return {
         ...current,
+        learningRules,
         expenses: expenseForm.id
           ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
           : [expense, ...current.expenses],
@@ -1923,23 +2018,20 @@ function App() {
   function renderActiveForm() {
     if (activeModule === 'gasto') {
       const selectedExpensePocketName = getPocketName(state.pockets, expenseForm.pocketId)
+      const selectedCategoryConfidence = getCategoryConfidenceForSelection(
+        expenseForm.category,
+        suggestion.category,
+        suggestion.confidence,
+      )
+      const selectedCategoryConfidenceLabel = getConfidenceLabel(selectedCategoryConfidence)
+      const isSuggestedCategorySelected = expenseForm.category === suggestion.category
+      const categoryLearningKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
+      const isExpenseFormValid = Number(expenseForm.amount) > 0
 
       return (
         <form className="bank-form movement-form" onSubmit={handleAddExpense}>
-          <section className="movement-form-hero movement-form-hero-expense">
-            <div>
-              <span className="movement-section-label">Salida</span>
-              <strong>Registra el gasto sin perder contexto</strong>
-              <p>Describe, asigna bolsillo y valida la categoria sugerida antes de guardar.</p>
-            </div>
-            <div className="movement-hero-badges">
-              <span>{selectedExpensePocketName}</span>
-              <span>{expenseForm.date}</span>
-            </div>
-          </section>
-
           <div className="movement-form-layout">
-            <section className="movement-form-card movement-form-main">
+            <section className="movement-form-card movement-form-main movement-expense-description-card">
               <div className="movement-field-grid">
                 <label className="movement-field-span-2">
                   Descripcion del gasto
@@ -1983,25 +2075,52 @@ function App() {
                     onChange={(event) => setExpenseForm((current) => ({ ...current, date: event.target.value }))}
                   />
                 </label>
+                <div className="movement-field-span-2 expense-category-card">
+                  <label className="expense-category-select">
+                    Categoria
+                    <select
+                      value={expenseForm.category}
+                      onChange={(event) =>
+                        setExpenseForm((current) => ({
+                          ...current,
+                          category: event.target.value as Category,
+                          categorySource:
+                            event.target.value === suggestion.category ? 'suggested' : 'manual',
+                        }))
+                      }
+                    >
+                      {state.categories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {!isSuggestedCategorySelected && (
+                    <button
+                      type="button"
+                      className="secondary-button slim expense-category-reset"
+                      onClick={() =>
+                        setExpenseForm((current) => ({
+                          ...current,
+                          category: suggestion.category,
+                          categorySource: 'suggested',
+                        }))
+                      }
+                    >
+                      Usar sugerencia IA
+                    </button>
+                  )}
+                </div>
               </div>
             </section>
-
-            <aside className="movement-form-card movement-form-side">
-              <div className="smart-box movement-smart-box">
-                <span>Categoria sugerida</span>
-                <strong>{suggestion.category}</strong>
-                <p>Confianza estimada: {Math.round(suggestion.confidence * 100)}%</p>
-                <p>
-                  {suggestion.matches.length > 0
-                    ? `Pistas detectadas: ${suggestion.matches.join(', ')}`
-                    : 'Sin reglas previas suficientes. Esta sugerencia usa coincidencias generales.'}
-                </p>
-              </div>
-            </aside>
           </div>
 
           <div className="composer-action-row movement-form-actions">
-            <button type="submit">{expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}</button>
+            <button type="submit" disabled={!isExpenseFormValid}>
+              {expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}
+            </button>
             {expenseForm.id && (
               <button
                 type="button"
@@ -2015,27 +2134,63 @@ function App() {
               </button>
             )}
           </div>
+
+          <section className="movement-form-card expense-post-info-card">
+            <div className="expense-category-meta">
+              <p>
+                Categoria seleccionada: <strong>{expenseForm.category}</strong>.
+              </p>
+              <p>
+                Confianza actual:{' '}
+                <strong>
+                  {selectedCategoryConfidenceLabel} ({Math.round(selectedCategoryConfidence * 100)}%)
+                </strong>
+                .
+              </p>
+              <p>
+                La IA propone <strong>{suggestion.category}</strong> con confianza{' '}
+                <strong>{Math.round(suggestion.confidence * 100)}%</strong>.
+              </p>
+              <p>
+                {suggestion.matches.length > 0
+                  ? `Motivo: detecte ${suggestion.matches.join(', ')} en la descripcion.`
+                  : 'Motivo: no habia reglas suficientes, asi que use coincidencias generales del texto.'}
+              </p>
+              <p>
+                {categoryLearningKeywords.length > 0
+                  ? `Aprendera con: ${categoryLearningKeywords.join(', ')}.`
+                  : 'Aprendera con esta descripcion cuando confirmes el gasto.'}
+              </p>
+              <span
+                className={
+                  isSuggestedCategorySelected
+                    ? 'expense-category-chip suggested'
+                    : 'expense-category-chip manual'
+                }
+              >
+                {isSuggestedCategorySelected ? 'IA activa' : 'Ajuste manual'}
+              </span>
+            </div>
+
+            <div className="movement-expense-summary">
+              <span className="movement-section-label">Salida</span>
+              <strong>{selectedExpensePocketName}</strong>
+              <p>{expenseForm.date}</p>
+              <p>
+                Al guardar, esta eleccion reforzara la categoria <strong>{expenseForm.category}</strong>.
+              </p>
+            </div>
+          </section>
         </form>
       )
     }
 
     if (activeModule === 'ingreso') {
       const selectedIncomePocketName = getPocketName(state.pockets, incomeForm.pocketId)
+      const isIncomeFormValid = Number(incomeForm.amount) > 0
 
       return (
         <form className="bank-form movement-form" onSubmit={handleAddIncome}>
-          <section className="movement-form-hero movement-form-hero-income">
-            <div>
-              <span className="movement-section-label">Entrada</span>
-              <strong>Captura ingresos con trazabilidad</strong>
-              <p>Define el origen del dinero, su destino y si debe repetirse en el tiempo.</p>
-            </div>
-            <div className="movement-hero-badges">
-              <span>{selectedIncomePocketName}</span>
-              <span>{incomeForm.recurring ? 'Recurrente' : 'Unico'}</span>
-            </div>
-          </section>
-
           <div className="movement-form-layout">
             <section className="movement-form-card movement-form-main">
               <div className="movement-field-grid">
@@ -2081,27 +2236,12 @@ function App() {
                 </label>
               </div>
             </section>
-
-            <aside className="movement-form-card movement-form-side">
-              <label className="movement-toggle-card">
-                <div>
-                  <span className="movement-section-label">Frecuencia</span>
-                  <strong>Ingreso recurrente</strong>
-                  <p>Activalo si este ingreso vuelve mes a mes y quieres mantenerlo identificado.</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={incomeForm.recurring}
-                  onChange={(event) =>
-                    setIncomeForm((current) => ({ ...current, recurring: event.target.checked }))
-                  }
-                />
-              </label>
-            </aside>
           </div>
 
           <div className="composer-action-row movement-form-actions">
-            <button type="submit">{incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}</button>
+            <button type="submit" disabled={!isIncomeFormValid}>
+              {incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}
+            </button>
             {incomeForm.id && (
               <button
                 type="button"
@@ -2115,6 +2255,35 @@ function App() {
               </button>
             )}
           </div>
+
+          <aside className="movement-form-card movement-form-side">
+            <label className="movement-toggle-card">
+              <div>
+                <span className="movement-section-label">Frecuencia</span>
+                <strong>Ingreso recurrente</strong>
+                <p>Activalo si este ingreso vuelve mes a mes y quieres mantenerlo identificado.</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={incomeForm.recurring}
+                onChange={(event) =>
+                  setIncomeForm((current) => ({ ...current, recurring: event.target.checked }))
+                }
+              />
+            </label>
+          </aside>
+
+          <section className="movement-form-hero movement-form-hero-income movement-form-hero-tail-mobile">
+            <div>
+              <span className="movement-section-label">Entrada</span>
+              <strong>Captura ingresos con trazabilidad</strong>
+              <p>Define el origen del dinero, su destino y si debe repetirse en el tiempo.</p>
+            </div>
+            <div className="movement-hero-badges">
+              <span>{selectedIncomePocketName}</span>
+              <span>{incomeForm.recurring ? 'Recurrente' : 'Unico'}</span>
+            </div>
+          </section>
         </form>
       )
     }
@@ -2122,21 +2291,14 @@ function App() {
     if (activeModule === 'transferencia') {
       const fromPocketName = getPocketName(state.pockets, transferForm.fromPocketId)
       const toPocketName = getPocketName(state.pockets, transferForm.toPocketId)
+      const isTransferFormValid =
+        transferForm.fromPocketId !== transferForm.toPocketId &&
+        Number(transferForm.amount) > 0 &&
+        transferForm.fromPocketId.trim().length > 0 &&
+        transferForm.toPocketId.trim().length > 0
 
       return (
         <form className="bank-form movement-form" onSubmit={handleAddTransfer}>
-          <section className="movement-form-hero movement-form-hero-transfer">
-            <div>
-              <span className="movement-section-label">Transferencia</span>
-              <strong>Mueve dinero entre bolsillos</strong>
-              <p>Confirma origen, destino y monto para mantener el balance interno consistente.</p>
-            </div>
-            <div className="movement-hero-badges">
-              <span>{fromPocketName}</span>
-              <span>{toPocketName}</span>
-            </div>
-          </section>
-
           <div className="movement-form-layout">
             <section className="movement-form-card movement-form-main">
               <div className="movement-field-grid">
@@ -2197,21 +2359,10 @@ function App() {
                 </label>
               </div>
             </section>
-
-            <aside className="movement-form-card movement-form-side">
-              <div className="movement-transfer-preview">
-                <span className="movement-section-label">Ruta</span>
-                <strong>{fromPocketName}</strong>
-                <p>sale desde el bolsillo origen</p>
-                <div className="movement-transfer-arrow">hacia</div>
-                <strong>{toPocketName}</strong>
-                <p>entra al bolsillo destino</p>
-              </div>
-            </aside>
           </div>
 
           <div className="composer-action-row movement-form-actions">
-            <button type="submit">
+            <button type="submit" disabled={!isTransferFormValid}>
               {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
             </button>
             {transferForm.id && (
@@ -2227,6 +2378,29 @@ function App() {
               </button>
             )}
           </div>
+
+          <aside className="movement-form-card movement-form-side">
+            <div className="movement-transfer-preview">
+              <span className="movement-section-label">Ruta</span>
+              <strong>{fromPocketName}</strong>
+              <p>sale desde el bolsillo origen</p>
+              <div className="movement-transfer-arrow">hacia</div>
+              <strong>{toPocketName}</strong>
+              <p>entra al bolsillo destino</p>
+            </div>
+          </aside>
+
+          <section className="movement-form-hero movement-form-hero-transfer movement-form-hero-tail-mobile">
+            <div>
+              <span className="movement-section-label">Transferencia</span>
+              <strong>Mueve dinero entre bolsillos</strong>
+              <p>Confirma origen, destino y monto para mantener el balance interno consistente.</p>
+            </div>
+            <div className="movement-hero-badges">
+              <span>{fromPocketName}</span>
+              <span>{toPocketName}</span>
+            </div>
+          </section>
         </form>
       )
     }
@@ -3239,6 +3413,7 @@ function App() {
             label="Registrar"
             title={moduleLabels[activeModule]}
             description={getModuleSummary(activeModule)}
+            enableSwipeClose
             hideHeader
             hideHeaderCopy
             panelClassName="movement-composer-panel"

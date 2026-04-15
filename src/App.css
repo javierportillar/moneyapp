@@ -599,6 +599,11 @@
   gap: 24px;
 }
 
+.fullscreen-composer-panel.swipe-close-enabled {
+  touch-action: pan-y;
+  will-change: transform, opacity;
+}
+
 .fullscreen-composer-body {
   margin-top: 8px;
   flex: 1;
@@ -917,6 +922,95 @@
     rgba(255, 255, 255, 0.02);
 }
 
+.movement-expense-description-card {
+  display: grid;
+  gap: 16px;
+}
+
+.expense-category-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.12), transparent 24%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.expense-category-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.expense-category-head strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--title);
+  font-size: 1.18rem;
+}
+
+.expense-category-chip {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.expense-category-chip.suggested {
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+}
+
+.expense-category-chip.manual {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde68a;
+}
+
+.expense-category-select {
+  display: grid;
+  gap: 8px;
+}
+
+.expense-category-meta {
+  display: grid;
+  gap: 8px;
+}
+
+.expense-category-meta p,
+.movement-expense-summary p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.expense-category-meta strong,
+.movement-expense-summary strong {
+  color: var(--title);
+}
+
+.expense-category-reset {
+  justify-self: start;
+}
+
+.expense-post-info-card {
+  display: grid;
+  gap: 16px;
+}
+
+.movement-expense-summary {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
 .movement-toggle-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1128,6 +1222,14 @@
 .bank-form button {
   background: linear-gradient(135deg, #0f172a, #1d4ed8);
   color: white;
+}
+
+.bank-form button:disabled {
+  background: linear-gradient(135deg, rgba(51, 65, 85, 0.72), rgba(100, 116, 139, 0.68));
+  color: rgba(226, 232, 240, 0.78);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.82;
 }
 
 .secondary-button {
@@ -4542,8 +4644,22 @@
     grid-column: auto;
   }
 
+  .movement-form-hero-tail-mobile {
+    order: 3;
+  }
+
   .movement-toggle-card {
     grid-template-columns: 1fr;
+  }
+
+  .expense-category-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .expense-category-reset {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .movement-form-actions > * {

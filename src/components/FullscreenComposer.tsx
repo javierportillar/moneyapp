@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react'
 
 type FullscreenComposerProps = {
   isOpen: boolean
@@ -6,6 +6,7 @@ type FullscreenComposerProps = {
   title: string
   description: string
   onClose: () => void
+  enableSwipeClose?: boolean
   hideHeader?: boolean
   hideHeaderCopy?: boolean
   toolbarContent?: ReactNode
@@ -17,6 +18,16 @@ type FullscreenComposerProps = {
 }
 
 export function FullscreenComposer(props: FullscreenComposerProps) {
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  const [isSwiping, setIsSwiping] = useState(false)
+  const touchStateRef = useRef({
+    startX: 0,
+    startY: 0,
+    deltaX: 0,
+    tracking: false,
+    horizontal: false,
+  })
+
   useEffect(() => {
     if (!props.isOpen) return
 
@@ -47,9 +58,22 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     }
   }, [props.isOpen, props.onClose])
 
+  useEffect(() => {
+    if (!props.isOpen) {
+      setSwipeOffset(0)
+      setIsSwiping(false)
+    }
+  }, [props.isOpen])
+
   if (!props.isOpen) return null
 
-  const panelClassName = ['fullscreen-composer-panel', 'banking-panel', 'action-panel', props.panelClassName]
+  const panelClassName = [
+    'fullscreen-composer-panel',
+    'banking-panel',
+    'action-panel',
+    props.enableSwipeClose ? 'swipe-close-enabled' : null,
+    props.panelClassName,
+  ]
     .filter(Boolean)
     .join(' ')
   const toolbarClassName = [
@@ -62,11 +86,90 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     .join(' ')
   const bodyClassName = ['fullscreen-composer-body', props.bodyClassName].filter(Boolean).join(' ')
   const toolbarInBody = props.toolbarContentPosition === 'body'
+  const swipeProgress = Math.min(1, Math.abs(swipeOffset) / 180)
+
+  function resetSwipeState() {
+    touchStateRef.current = {
+      startX: 0,
+      startY: 0,
+      deltaX: 0,
+      tracking: false,
+      horizontal: false,
+    }
+    setSwipeOffset(0)
+    setIsSwiping(false)
+  }
+
+  function handleTouchStart(event: TouchEvent<HTMLElement>) {
+    if (!props.enableSwipeClose) return
+    const touch = event.touches[0]
+    touchStateRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      deltaX: 0,
+      tracking: true,
+      horizontal: false,
+    }
+  }
+
+  function handleTouchMove(event: TouchEvent<HTMLElement>) {
+    if (!props.enableSwipeClose || !touchStateRef.current.tracking) return
+
+    const touch = event.touches[0]
+    const deltaX = touch.clientX - touchStateRef.current.startX
+    const deltaY = touch.clientY - touchStateRef.current.startY
+
+    if (!touchStateRef.current.horizontal) {
+      if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10) return
+      if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
+        touchStateRef.current.tracking = false
+        return
+      }
+      touchStateRef.current.horizontal = true
+      setIsSwiping(true)
+    }
+
+    if (event.cancelable) {
+      event.preventDefault()
+    }
+
+    const nextOffset = Math.min(180, Math.max(0, deltaX))
+    touchStateRef.current.deltaX = nextOffset
+    setSwipeOffset(nextOffset)
+  }
+
+  function handleTouchEnd() {
+    if (!props.enableSwipeClose) return
+
+    const shouldClose = touchStateRef.current.deltaX > 96
+    if (shouldClose) {
+      resetSwipeState()
+      props.onClose()
+      return
+    }
+
+    resetSwipeState()
+  }
 
   return (
     <div className="fullscreen-composer-shell">
       <div className="fullscreen-composer-backdrop" onClick={props.onClose} />
-      <section className={panelClassName}>
+      <section
+        className={panelClassName}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={
+          props.enableSwipeClose
+            ? {
+                transform: `translate3d(${swipeOffset}px, 0, 0)`,
+                opacity: 1 - swipeProgress * 0.18,
+                transition: isSwiping ? 'none' : 'transform 220ms ease, opacity 220ms ease',
+              }
+            : undefined
+        }
+      >
         {!props.hideHeader && (
           <div className={toolbarClassName}>
             {!props.hideHeaderCopy && (
