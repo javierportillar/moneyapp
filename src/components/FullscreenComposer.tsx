@@ -91,11 +91,6 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
   function handleTouchStart(event: TouchEvent<HTMLElement>) {
     if (!props.enableSwipeClose) return
     const touch = event.touches[0]
-    const edgeSwipeZone = 28
-    if (touch.clientX > edgeSwipeZone) {
-      resetSwipeState()
-      return
-    }
     touchStateRef.current = {
       startX: touch.clientX,
       startY: touch.clientY,
@@ -144,13 +139,17 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
   return (
     <div className="fullscreen-composer-shell">
       <div className="fullscreen-composer-backdrop" onClick={props.onClose} />
-      <section
-        className={panelClassName}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
-      >
+      {props.enableSwipeClose && (
+        <div
+          className="fullscreen-composer-swipe-hotspot"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
+          aria-hidden="true"
+        />
+      )}
+      <section className={panelClassName}>
         {!props.hideHeader && (
           <div className={toolbarClassName}>
             {!props.hideHeaderCopy && (
