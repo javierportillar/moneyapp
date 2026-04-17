@@ -4,16 +4,17 @@ import { getSupabaseClient } from './supabaseClient'
 const FINANCE_TABLE = import.meta.env.VITE_SUPABASE_FINANCE_TABLE || 'finance_snapshots'
 
 export function createSupabaseSnapshotDriver<T>(profileId?: string | null): RemoteSnapshotDriver<T> | null {
-  const client = getSupabaseClient()
-
-  if (!client || !profileId) {
+  if (!profileId) {
     return null
   }
+  if (!getSupabaseClient()) return null
 
   return {
     configured: true,
     profileId,
     async load() {
+      const client = getSupabaseClient()
+      if (!client) throw new Error('Supabase no esta configurado.')
       const { data, error } = await client
         .from(FINANCE_TABLE)
         .select('payload, updated_at')
@@ -29,6 +30,8 @@ export function createSupabaseSnapshotDriver<T>(profileId?: string | null): Remo
       }
     },
     async save(envelope: PersistedEnvelope<T>) {
+      const client = getSupabaseClient()
+      if (!client) throw new Error('Supabase no esta configurado.')
       const { error } = await client.from(FINANCE_TABLE).upsert(
         {
           profile_id: profileId,

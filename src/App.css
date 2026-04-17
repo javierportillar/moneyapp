@@ -1543,10 +1543,27 @@ html, body {
     rgba(16, 185, 129, 0.62),
     rgba(29, 78, 216, 0)
   );
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 200ms ease, transform 200ms ease;
+  background-size: 220% 100%;
+  opacity: 0.28;
+  transform: translateY(0);
+  transition: opacity 200ms ease;
+  animation: movement-choice-shimmer 6s linear infinite;
   pointer-events: none;
+}
+
+@keyframes movement-choice-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 220% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .movement-filter-choice::after {
+    animation: none;
+  }
 }
 
 .movement-filter-choice:hover,
@@ -1558,8 +1575,7 @@ html, body {
 
 .movement-filter-choice:hover::after,
 .movement-filter-choice:focus-within::after {
-  opacity: 0.9;
-  transform: translateY(0);
+  opacity: 0.75;
 }
 
 .movement-filter-choice.is-active {

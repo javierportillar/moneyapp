@@ -433,6 +433,7 @@ function App() {
     lastSyncedAt,
     supabaseConfigured,
     profileId,
+    syncNow,
   } = usePersistentSnapshot<AppState>({
     storageKey: STORAGE_KEY,
     initialState,
@@ -4691,18 +4692,25 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
-          <SectionFrame
-            label="Persistencia"
-            title="Estado de sincronizacion"
-            subtitle={
-              supabaseConfigured
-                ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
-                : 'Supabase aun no esta configurado. La app opera en modo local.'
-            }
-            collapsed={isSectionCollapsed('config-sync')}
-            onToggle={() => toggleSection('config-sync')}
-            emphasis
-          >
+	          <SectionFrame
+	            label="Persistencia"
+	            title="Estado de sincronizacion"
+	            subtitle={
+	              supabaseConfigured
+	                ? `Supabase activo con perfil ${profileId ?? 'sin perfil'}.`
+	                : 'Supabase aun no esta configurado. La app opera en modo local.'
+	            }
+	            actions={
+	              supabaseConfigured ? (
+	                <button type="button" className="text-link" onClick={() => void syncNow()}>
+	                  Forzar sincronizacion
+	                </button>
+	              ) : null
+	            }
+	            collapsed={isSectionCollapsed('config-sync')}
+	            onToggle={() => toggleSection('config-sync')}
+	            emphasis
+	          >
             <div className="status-grid">
               <div>
                 <span>Origen</span>
@@ -5257,13 +5265,14 @@ function App() {
             <p>{dateFormatter.format(now)}</p>
           </section>
 
-          <section className="sidebar-card muted">
-            <span className="micro-label">Recomendacion</span>
-            <p>{coachingMessage}</p>
-            <small>Persistencia: {supabaseConfigured ? `Supabase + ${syncSource}` : 'localStorage'}</small>
-          </section>
-        </div>
-      </aside>
+	          <section className="sidebar-card muted">
+	            <span className="micro-label">Recomendacion</span>
+	            <p>{coachingMessage}</p>
+	            <small>Persistencia: {supabaseConfigured ? `Supabase + ${syncSource}` : 'localStorage'}</small>
+	            {supabaseConfigured && syncError && <small className="movement-detail">{syncError}</small>}
+	          </section>
+	        </div>
+	      </aside>
 
       <section className="workspace">
         {activeView !== 'resumen' && activeView !== 'movimientos' && (

@@ -36,6 +36,15 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
+function normalizeAppIdSegment(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+}
+
 function normalizeTimeFromDb(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
@@ -72,6 +81,37 @@ async function fetchExistingAppIds(table: string, usuarioId: string) {
   const { data, error } = await client.from(table).select('id, app_id').eq('usuario_id', usuarioId)
   if (error) throw error
   return new Map<string, string>((data ?? []).map((row: any) => [row.app_id, row.id]))
+}
+
+async function fetchExistingCategories(usuarioId: string) {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { data, error } = await client
+    .from(TABLES.categories)
+    .select('id, app_id, nombre')
+    .eq('usuario_id', usuarioId)
+  if (error) throw error
+
+  return new Map<string, { id: string; appId: string }>(
+    (data ?? []).map((row: any) => [row.nombre as string, { id: row.id as string, appId: row.app_id as string }]),
+  )
+}
+
+async function fetchExistingLearningRules(usuarioId: string) {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { data, error } = await client
+    .from(TABLES.learningRules)
+    .select('id, app_id, palabra_clave')
+    .eq('usuario_id', usuarioId)
+  if (error) throw error
+
+  return new Map<string, { id: string; appId: string }>(
+    (data ?? []).map((row: any) => [
+      row.palabra_clave as string,
+      { id: row.id as string, appId: row.app_id as string },
+    ]),
+  )
 }
 
 async function fetchExistingMonthClosures(usuarioId: string) {
@@ -158,13 +198,15 @@ async function deleteMonthClosures(usuarioId: string, keepMonthKeys: string[]) {
 }
 
 export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): RemoteSnapshotDriver<T> | null {
-  const client = getSupabaseClient()
-  if (!client || !usuarioId) return null
+  if (!usuarioId) return null
+  if (!getSupabaseClient()) return null
 
   return {
     configured: true,
     profileId: usuarioId,
     async load() {
+      const client = getSupabaseClient()
+      if (!client) throw new Error('Supabase no esta configurado.')
       const [
         settingsResult,
         categoriesResult,
@@ -359,42 +401,50 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       }
     },
     async save(envelope: PersistedEnvelope<T>) {
+      const client = getSupabaseClient()
+      if (!client) throw new Error('Supabase no esta configurado.')
       const state = envelope.state as AppState
 
       const [
-        existingCategories,
+        existingCategoriesByName,
         existingPockets,
         existingObligations,
         existingDebts,
         existingExpenses,
         existingTransfers,
         existingIncomes,
-        existingLearningRules,
+        existingLearningRulesByKeyword,
         existingDebtPayments,
         existingObligationPayments,
         existingMonthClosures,
       ] = await Promise.all([
-        fetchExistingAppIds(TABLES.categories, usuarioId),
+        fetchExistingCategories(usuarioId),
         fetchExistingAppIds(TABLES.pockets, usuarioId),
         fetchExistingAppIds(TABLES.obligations, usuarioId),
         fetchExistingAppIds(TABLES.debts, usuarioId),
         fetchExistingAppIds(TABLES.expenses, usuarioId),
         fetchExistingAppIds(TABLES.transfers, usuarioId),
         fetchExistingAppIds(TABLES.incomes, usuarioId),
-        fetchExistingAppIds(TABLES.learningRules, usuarioId),
+        fetchExistingLearningRules(usuarioId),
         fetchExistingAppIds(TABLES.debtPayments, usuarioId),
         fetchExistingAppIds(TABLES.obligationPayments, usuarioId),
         fetchExistingMonthClosures(usuarioId),
       ])
 
-      const categoryRows = state.categories.map((nombre, index) => ({
-        id: existingCategories.get(`category:${index}:${String(nombre).toLowerCase()}`) ?? crypto.randomUUID(),
-        usuario_id: usuarioId,
-        app_id: `category:${index}:${String(nombre).toLowerCase()}`,
-        nombre,
-        posicion: index,
-        updated_at: envelope.updatedAt,
-      }))
+      const categoryRows = state.categories.map((rawName, index) => {
+        const nombre = rawName.trim()
+        const existing = existingCategoriesByName.get(nombre)
+        const appId = existing?.appId ?? `category:${normalizeAppIdSegment(nombre)}`
+
+        return {
+          id: existing?.id ?? crypto.randomUUID(),
+          usuario_id: usuarioId,
+          app_id: appId,
+          nombre,
+          posicion: index,
+          updated_at: envelope.updatedAt,
+        }
+      })
       const categoryNameToId = new Map<string, string>(categoryRows.map((row) => [row.nombre, row.id]))
 
       const pocketRows = state.pockets.map((item, index) => ({
@@ -545,10 +595,12 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         created_at: envelope.updatedAt,
       }))
 
-      const learningRuleRows = state.learningRules.map((item, index) => ({
-        id: existingLearningRules.get(`${item.keyword}:${index}`) ?? crypto.randomUUID(),
+      const learningRuleRows = state.learningRules.map((item) => ({
+        id: existingLearningRulesByKeyword.get(item.keyword)?.id ?? crypto.randomUUID(),
         usuario_id: usuarioId,
-        app_id: `${item.keyword}:${index}`,
+        app_id:
+          existingLearningRulesByKeyword.get(item.keyword)?.appId ??
+          `rule:${normalizeAppIdSegment(item.keyword)}`,
         palabra_clave: item.keyword,
         categoria_id: categoryNameToId.get(item.category) ?? categoryNameToId.get('Otros') ?? null,
         aciertos: item.hits,

@@ -13,6 +13,20 @@ update public.ingresos set hora = coalesce(hora, '00:00') where hora is null;
 update public.gastos set hora = coalesce(hora, '00:00') where hora is null;
 update public.transferencias set hora = coalesce(hora, '00:00') where hora is null;
 
+-- Best-effort backfill: if existing rows got the default '00:00', derive the local hour from `created_at`.
+-- Adjust the timezone string if your app uses a different locale.
+update public.ingresos
+set hora = to_char(created_at at time zone 'America/Bogota', 'HH24:MI')
+where hora = '00:00';
+
+update public.gastos
+set hora = to_char(created_at at time zone 'America/Bogota', 'HH24:MI')
+where hora = '00:00';
+
+update public.transferencias
+set hora = to_char(created_at at time zone 'America/Bogota', 'HH24:MI')
+where hora = '00:00';
+
 alter table public.ingresos alter column hora set not null;
 alter table public.gastos alter column hora set not null;
 alter table public.transferencias alter column hora set not null;

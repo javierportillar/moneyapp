@@ -10,6 +10,13 @@ export type RemoteSnapshotDriver<T> = {
   save: (envelope: PersistedEnvelope<T>) => Promise<void>
 }
 
+export type PersistResult<T> = {
+  envelope: PersistedEnvelope<T>
+  source: 'local' | 'remote'
+  profileId?: string
+  error?: string
+}
+
 function isEnvelope<T>(value: unknown): value is PersistedEnvelope<T> {
   return Boolean(
     value &&
@@ -67,7 +74,7 @@ export async function loadPersistedState<T>(options: {
   hydrate: (raw: T) => T
   remote?: RemoteSnapshotDriver<T> | null
   preferRemote?: boolean
-}) {
+}): Promise<PersistResult<T>> {
   const local = readLocalEnvelope(options.storageKey, options.hydrate, options.fallback)
 
   if (!options.remote?.configured) {
@@ -110,11 +117,12 @@ export async function loadPersistedState<T>(options: {
       source: 'local' as const,
       profileId: options.remote.profileId,
     }
-  } catch {
+  } catch (error) {
     return {
       envelope: local,
       source: 'local' as const,
       profileId: options.remote.profileId,
+      error: error instanceof Error ? error.message : 'No se pudo cargar desde Supabase.',
     }
   }
 }
@@ -124,7 +132,7 @@ export async function savePersistedState<T>(options: {
   state: T
   remote?: RemoteSnapshotDriver<T> | null
   preferRemote?: boolean
-}) {
+}): Promise<PersistResult<T>> {
   const envelope: PersistedEnvelope<T> = {
     state: options.state,
     updatedAt: new Date().toISOString(),
@@ -148,12 +156,13 @@ export async function savePersistedState<T>(options: {
       source: 'remote' as const,
       profileId: options.remote.profileId,
     }
-  } catch {
+  } catch (error) {
     writeLocalEnvelope(options.storageKey, envelope)
     return {
       envelope,
       source: 'local' as const,
       profileId: options.remote.profileId,
+      error: error instanceof Error ? error.message : 'No se pudo guardar en Supabase.',
     }
   }
 }
