@@ -8,7 +8,6 @@ html, body {
 .banking-app {
   min-height: 100dvh;
   min-height: 100vh;
-  padding-top: env(safe-area-inset-top);
   display: grid;
   grid-template-columns: 280px 1fr;
   overflow-x: clip;
@@ -1518,6 +1517,66 @@ html, body {
   min-width: 0;
 }
 
+.movement-filter-choice {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 200ms ease,
+    transform 160ms ease,
+    background 240ms ease;
+}
+
+.movement-filter-choice::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(29, 78, 216, 0),
+    rgba(29, 78, 216, 0.72),
+    rgba(16, 185, 129, 0.62),
+    rgba(29, 78, 216, 0)
+  );
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 200ms ease, transform 200ms ease;
+  pointer-events: none;
+}
+
+.movement-filter-choice:hover,
+.movement-filter-choice:focus-within {
+  border-color: rgba(29, 78, 216, 0.35);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+.movement-filter-choice:hover::after,
+.movement-filter-choice:focus-within::after {
+  opacity: 0.9;
+  transform: translateY(0);
+}
+
+.movement-filter-choice.is-active {
+  border-color: rgba(29, 78, 216, 0.48);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 249, 0.86));
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
+}
+
+.movement-filter-choice.is-active::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.movement-filter-choice select {
+  cursor: pointer;
+}
+
 .search-field.expanded {
   background: linear-gradient(180deg, #f8fafc, #eef4fb);
 }
@@ -2729,7 +2788,8 @@ html, body {
     max-height: 100dvh;
     min-height: 100dvh;
     border-radius: 0;
-    padding: 24px 20px;
+    padding: calc(env(safe-area-inset-top, 0px) + 24px) 20px 24px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
   }
 
   .composer-toolbar {
@@ -4036,8 +4096,8 @@ html, body {
 
 @media (max-width: 820px) {
   .banking-app {
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: 112px;
+    padding-top: 0;
+    padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
   }
 
   .mobile-menu-shell {
@@ -4048,7 +4108,7 @@ html, body {
     z-index: 45;
     display: flex;
     justify-content: flex-end;
-    padding: 0 14px calc(20px + env(safe-area-inset-bottom));
+    padding: 0 14px env(safe-area-inset-bottom, 0px);
     pointer-events: none;
   }
 
@@ -5540,7 +5600,7 @@ html, body {
 @media (max-width: 820px) {
   .mobile-menu-shell {
     z-index: 95;
-    padding: 0 14px calc(20px + env(safe-area-inset-bottom));
+    padding: 0 14px env(safe-area-inset-bottom, 0px);
   }
 
   .mobile-menu-panel {

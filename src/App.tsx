@@ -116,7 +116,9 @@ function getCurrentTimeHHmm() {
 
 function normalizeTimeHHmm(value: string | undefined) {
   if (!value) return '00:00'
-  if (/^\d{2}:\d{2}$/.test(value)) return value
+  const trimmed = value.trim()
+  if (/^\d{2}:\d{2}$/.test(trimmed)) return trimmed
+  if (/^\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(trimmed)) return trimmed.slice(0, 5)
   return '00:00'
 }
 
@@ -1068,8 +1070,6 @@ function App() {
       : movementSummary.outflow > 0
         ? 1
         : 0
-  const movementTransferShare =
-    movementSummary.count > 0 ? movementSummary.transfers / movementSummary.count : 0
   const movementVolume = movementSummary.inflow + movementSummary.outflow
   const movementAverageTicket =
     movementSummary.count > 0 ? movementVolume / movementSummary.count : 0
@@ -1520,33 +1520,36 @@ function App() {
   function handleAddExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const numericAmount = Number(expenseForm.amount)
-    if (!expenseForm.description.trim() || numericAmount <= 0) return
+    if (numericAmount <= 0) return
 
-	    const expenseDate = expenseForm.date || today
-	    const fallbackTime = getCurrentTimeHHmm()
-	    const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
+    const trimmedDescription = expenseForm.description.trim()
+    const expenseDate = expenseForm.date || today
+    const fallbackTime = getCurrentTimeHHmm()
+    const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
 
-	    const executeAddExpense = () => {
-	      setState((current) => {
-	        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
+    const executeAddExpense = () => {
+      setState((current) => {
+        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
         const selectedCategory = expenseForm.category
         const selectedConfidence = getCategoryConfidenceForSelection(
           selectedCategory,
           suggestion.category,
           suggestion.confidence,
         )
-        const learnedKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
-	        const expense: Expense = {
-	          id: expenseForm.id || crypto.randomUUID(),
-	          description: expenseForm.description.trim(),
-	          amount: numericAmount,
-	          pocketId: expenseForm.pocketId,
-	          date: expenseDate,
-	          time: currentExpense?.time ?? fallbackTime,
-	          source: currentExpense?.source ?? 'manual',
-	          category: selectedCategory,
-	          confidence: selectedConfidence,
-	        }
+        const learnedKeywords = trimmedDescription
+          ? deriveLearningKeywords(trimmedDescription, suggestion.matches)
+          : []
+        const expense: Expense = {
+          id: expenseForm.id || crypto.randomUUID(),
+          description: trimmedDescription || 'Gasto',
+          amount: numericAmount,
+          pocketId: expenseForm.pocketId,
+          date: expenseDate,
+          time: currentExpense?.time ?? fallbackTime,
+          source: currentExpense?.source ?? 'manual',
+          category: selectedCategory,
+          confidence: selectedConfidence,
+        }
 
         const learningRules = [...current.learningRules]
         learnedKeywords.forEach((keyword) => {
@@ -2981,7 +2984,7 @@ function App() {
                 <div className="flow-metric-head">
                   <MetricLabel
                     label={`Ingresos ${previousMonthKey}`}
-                    info="Entradas del mes anterior. Si cerraste ese mes, toma el cierre; si no, usa el cálculo en vivo."
+                    info="Entradas del mes anterior calculadas en vivo. Si registras algo con fecha anterior, el resumen se ajusta automaticamente."
                   />
                   <strong>{money.format(monthOverMonth.previousIncome)}</strong>
                 </div>
@@ -3717,30 +3720,50 @@ function App() {
             Registrar movimiento
           </button>
 
-          <div className="movement-filter-layout simplified">
-            <div className="filter-field compact inline">
-              <span className="filter-field-label">Bolsillo</span>
-              <div className="filter-select-wrap">
-                <select
-                  value={movementFilters.pocketId}
-                  onChange={(event) =>
-                    setMovementFilters((current) => ({ ...current, pocketId: event.target.value }))
-                  }
-                >
-                  <option value="todos">Todos los bolsillos</option>
-                  {state.pockets.map((pocket) => (
-                    <option key={pocket.id} value={pocket.id}>
-                      {pocket.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="filter-field compact inline">
-              <span className="filter-field-label">Tipo</span>
-              <div className="filter-select-wrap">
-                <select
-                  value={movementFilters.kind}
+	          <div className="movement-filter-layout simplified">
+	            <div
+	              className={[
+	                'filter-field',
+	                'compact',
+	                'inline',
+	                'movement-filter-choice',
+	                movementFilters.pocketId !== 'todos' ? 'is-active' : null,
+	              ]
+	                .filter(Boolean)
+	                .join(' ')}
+	            >
+	              <span className="filter-field-label">Bolsillo</span>
+	              <div className="filter-select-wrap">
+	                <select
+	                  value={movementFilters.pocketId}
+	                  onChange={(event) =>
+	                    setMovementFilters((current) => ({ ...current, pocketId: event.target.value }))
+	                  }
+	                >
+	                  <option value="todos">Todos los bolsillos</option>
+	                  {state.pockets.map((pocket) => (
+	                    <option key={pocket.id} value={pocket.id}>
+	                      {pocket.name}
+	                    </option>
+	                  ))}
+	                </select>
+	              </div>
+	            </div>
+	            <div
+	              className={[
+	                'filter-field',
+	                'compact',
+	                'inline',
+	                'movement-filter-choice',
+	                movementFilters.kind !== 'todos' ? 'is-active' : null,
+	              ]
+	                .filter(Boolean)
+	                .join(' ')}
+	            >
+	              <span className="filter-field-label">Tipo</span>
+	              <div className="filter-select-wrap">
+	                <select
+	                  value={movementFilters.kind}
                   onChange={(event) =>
                     setMovementFilters((current) => ({
                       ...current,
@@ -3752,10 +3775,10 @@ function App() {
                   <option value="gasto">Gastos</option>
                   <option value="ingreso">Ingresos</option>
                   <option value="transferencia">Transferencias</option>
-                </select>
-              </div>
-            </div>
-          </div>
+	                </select>
+	              </div>
+	            </div>
+	          </div>
 
             <div
               className="movement-summary-grid refined movement-summary-grid-compact movement-summary-grid-premium"
@@ -3776,11 +3799,11 @@ function App() {
                 <strong>{movementSummary.count}</strong>
                 <small>Ticket medio {money.format(movementAverageTicket)}</small>
               </div>
-              <div className="summary-box movement-stat balance neutral">
-                <span>Transferencias</span>
-                <strong>{movementSummary.transfers}</strong>
-                <small>{percent.format(movementTransferShare)} del total</small>
-              </div>
+	              <div className="summary-box movement-stat balance neutral">
+	                <span>Balance</span>
+	                <strong>{money.format(movementSummary.inflow - movementSummary.outflow)}</strong>
+	                <small>Neto del periodo</small>
+	              </div>
           </div>
         </section>
 

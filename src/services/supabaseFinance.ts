@@ -36,6 +36,21 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
+function normalizeTimeFromDb(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (/^\d{2}:\d{2}$/.test(trimmed)) return trimmed
+  if (/^\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(trimmed)) return trimmed.slice(0, 5)
+  return undefined
+}
+
+function extractLocalTimeHHmm(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return undefined
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
 function hasRelationalData(state: Partial<AppState>) {
   return (
     Boolean(state.config) ||
@@ -72,7 +87,46 @@ async function upsertRows(table: string, rows: any[], onConflict: string) {
   const client = getSupabaseClient()
   if (!client) throw new Error('Supabase no esta configurado.')
   const { error } = await client.from(table).upsert(rows, { onConflict })
-  if (error) throw error
+  if (!error) return
+
+  throw error
+}
+
+function omitColumns<T extends Record<string, any>>(rows: T[], columns: string[]) {
+  return rows.map((row) => {
+    const copy = { ...row }
+    columns.forEach((column) => {
+      delete copy[column]
+    })
+    return copy
+  })
+}
+
+async function upsertRowsWithFallback(
+  table: string,
+  rows: any[],
+  onConflict: string,
+  fallbackColumns: string[],
+) {
+  if (!rows.length) return
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+
+  const { error } = await client.from(table).upsert(rows, { onConflict })
+  if (!error) return
+
+  const message = String((error as any)?.message ?? '')
+  const shouldRetry = fallbackColumns.some(
+    (column) =>
+      message.includes(column) &&
+      (message.includes('schema cache') || message.includes('Could not find') || message.includes('does not exist')),
+  )
+
+  if (!shouldRetry) throw error
+
+  const strippedRows = omitColumns(rows, fallbackColumns)
+  const { error: retryError } = await client.from(table).upsert(strippedRows, { onConflict })
+  if (retryError) throw retryError
 }
 
 async function deleteRowsByAppId(table: string, usuarioId: string, keepAppIds: string[]) {
@@ -183,6 +237,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         amount: toNumber(row.monto),
         pocketId: pocketIdToAppId.get(row.bolsillo_id) ?? '',
         date: row.fecha,
+        time: normalizeTimeFromDb(row.hora) ?? extractLocalTimeHHmm(row.created_at),
         source: row.origen,
         category: categoryIdToName.get(row.categoria_id) ?? 'Otros',
         confidence: toNumber(row.confianza),
@@ -194,6 +249,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         amount: toNumber(row.monto),
         pocketId: pocketIdToAppId.get(row.bolsillo_id) ?? '',
         date: row.fecha,
+        time: normalizeTimeFromDb(row.hora) ?? extractLocalTimeHHmm(row.created_at),
         recurring: Boolean(row.recurrente),
       }))
 
@@ -203,6 +259,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         toPocketId: pocketIdToAppId.get(row.bolsillo_destino_id) ?? '',
         amount: toNumber(row.monto),
         date: row.fecha,
+        time: normalizeTimeFromDb(row.hora) ?? extractLocalTimeHHmm(row.created_at),
         note: row.nota ?? '',
       }))
 
@@ -403,6 +460,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         descripcion: item.description,
         monto: item.amount,
         fecha: item.date,
+        hora: normalizeTimeFromDb(item.time) ?? '00:00',
         origen: item.source,
         confianza: item.confidence,
         updated_at: envelope.updatedAt,
@@ -415,6 +473,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         bolsillo_destino_id: pocketAppIdToId.get(item.toPocketId) ?? null,
         monto: item.amount,
         fecha: item.date,
+        hora: normalizeTimeFromDb(item.time) ?? '00:00',
         nota: item.note,
         updated_at: envelope.updatedAt,
       }))
@@ -427,6 +486,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         titulo: item.title,
         monto: item.amount,
         fecha: item.date,
+        hora: normalizeTimeFromDb(item.time) ?? '00:00',
         recurrente: item.recurring,
         updated_at: envelope.updatedAt,
       }))
@@ -514,11 +574,11 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       await upsertRows(TABLES.categories, categoryRows, 'usuario_id,app_id')
       await upsertRows(TABLES.pockets, pocketRows, 'usuario_id,app_id')
       await upsertRows(TABLES.learningRules, learningRuleRows, 'usuario_id,app_id')
-      await upsertRows(TABLES.incomes, incomeRows, 'usuario_id,app_id')
+      await upsertRowsWithFallback(TABLES.incomes, incomeRows, 'usuario_id,app_id', ['hora'])
       await upsertRows(TABLES.obligations, obligationRows, 'usuario_id,app_id')
       await upsertRows(TABLES.debts, debtRows, 'usuario_id,app_id')
-      await upsertRows(TABLES.expenses, expenseRows, 'usuario_id,app_id')
-      await upsertRows(TABLES.transfers, transferRows, 'usuario_id,app_id')
+      await upsertRowsWithFallback(TABLES.expenses, expenseRows, 'usuario_id,app_id', ['hora'])
+      await upsertRowsWithFallback(TABLES.transfers, transferRows, 'usuario_id,app_id', ['hora'])
       await upsertRows(
         TABLES.obligationPayments,
         obligationPaymentRows.filter((row) => row.obligacion_id),

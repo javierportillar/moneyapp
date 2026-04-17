@@ -155,6 +155,7 @@ create table public.ingresos (
   titulo text not null,
   monto numeric(14,2) not null check (monto > 0),
   fecha date not null,
+  hora text not null default '00:00' check (hora ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
   recurrente boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
@@ -190,6 +191,7 @@ create table public.gastos (
   descripcion text not null,
   monto numeric(14,2) not null check (monto > 0),
   fecha date not null,
+  hora text not null default '00:00' check (hora ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
   origen text not null check (origen in ('manual', 'wallet', 'fixed', 'debt')),
   confianza numeric(4,3) not null default 1 check (confianza between 0 and 1),
   created_at timestamptz not null default timezone('utc', now()),
@@ -205,6 +207,7 @@ create table public.transferencias (
   bolsillo_destino_id uuid not null references public.bolsillos (id) on delete restrict,
   monto numeric(14,2) not null check (monto > 0),
   fecha date not null,
+  hora text not null default '00:00' check (hora ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
   nota text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
@@ -477,7 +480,8 @@ select
   g.bolsillo_id as bolsillo_principal_id,
   null::uuid as bolsillo_secundario_id,
   g.origen,
-  g.categoria_id
+  g.categoria_id,
+  g.hora as hora_movimiento
 from public.gastos g
 union all
 select
@@ -490,7 +494,8 @@ select
   i.bolsillo_id,
   null::uuid,
   case when i.recurrente then 'recurrente' else 'manual' end,
-  null::uuid
+  null::uuid,
+  i.hora
 from public.ingresos i
 union all
 select
@@ -503,7 +508,8 @@ select
   t.bolsillo_origen_id,
   t.bolsillo_destino_id,
   'transferencia',
-  null::uuid
+  null::uuid,
+  t.hora
 from public.transferencias t;
 
 grant usage on schema public to anon, authenticated;
