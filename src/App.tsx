@@ -105,6 +105,25 @@ function normalize(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
 
+function keepOnlyDigits(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+function getCurrentTimeHHmm() {
+  const now = new Date()
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+}
+
+function normalizeTimeHHmm(value: string | undefined) {
+  if (!value) return '00:00'
+  if (/^\d{2}:\d{2}$/.test(value)) return value
+  return '00:00'
+}
+
+function formatMovementDateTimeDisplay(date: string, time: string | undefined) {
+  return `${formatDateInputDisplay(date)} · ${normalizeTimeHHmm(time)}`
+}
+
 const learningStopWords = new Set([
   'para',
   'como',
@@ -188,6 +207,11 @@ function predictCategory(description: string, rules: LearningRule[]) {
 
 function getPocketName(pockets: Pocket[], pocketId: string) {
   return pockets.find((pocket) => pocket.id === pocketId)?.name ?? 'Sin bolsillo'
+}
+
+function getPocketMethod(pockets: Pocket[], pocketId: string) {
+  const type = pockets.find((pocket) => pocket.id === pocketId)?.type ?? 'daily'
+  return describePocketType(type)
 }
 
 function describePocketType(type: PocketType) {
@@ -536,11 +560,15 @@ function App() {
     pocketId: string
     kind: 'todos' | MovementKind
     query: string
+    date: string
+    pocketType: 'todos' | PocketType
     groupBy: 'dia' | 'mes'
   }>({
     pocketId: 'todos',
     kind: 'todos',
     query: '',
+    date: '',
+    pocketType: 'todos',
     groupBy: 'dia',
   })
   const [movementMonthKey, setMovementMonthKey] = useState(currentMonthKey)
@@ -555,15 +583,16 @@ function App() {
   })
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
-  const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
-  const expenseDateInputRef = useRef<HTMLInputElement | null>(null)
-  const incomeDateInputRef = useRef<HTMLInputElement | null>(null)
-  const transferDateInputRef = useRef<HTMLInputElement | null>(null)
-  const [fixedPaymentDraft, setFixedPaymentDraft] = useState<{
-    fixedId: string
-    pocketId: string
-    paymentDate: string
-  } | null>(null)
+	  const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
+	  const expenseDateInputRef = useRef<HTMLInputElement | null>(null)
+	  const incomeDateInputRef = useRef<HTMLInputElement | null>(null)
+	  const transferDateInputRef = useRef<HTMLInputElement | null>(null)
+	  const movementFilterDateInputRef = useRef<HTMLInputElement | null>(null)
+	  const [fixedPaymentDraft, setFixedPaymentDraft] = useState<{
+	    fixedId: string
+	    pocketId: string
+	    paymentDate: string
+	  } | null>(null)
   const [managedUsers, setManagedUsers] = useState<
     Array<{ username: string; cedula: string; nombre: string | null; password: string; typeuser: 'admin' | 'user' }>
   >([])
@@ -826,118 +855,167 @@ function App() {
     return Object.entries(grouped).sort((a, b) => b[1] - a[1]).slice(0, 4)
   }, [monthExpenses])
 
-  const activity = useMemo(() => {
-    const items = [
-      ...monthExpenses.map((expense) => ({
-        id: expense.id,
-        date: expense.date,
-        kind: 'gasto' as const,
-        source: expense.source,
-        editable: expense.source === 'manual' || expense.source === 'wallet',
-        deletable: expense.source === 'manual' || expense.source === 'wallet',
-        title: expense.description,
-        amount: -expense.amount,
-        pocketIds: [expense.pocketId],
-        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
-        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
-      })),
-      ...monthIncomes.map((income) => ({
-        id: income.id,
-        date: income.date,
-        kind: 'ingreso' as const,
-        source: 'manual' as const,
-        editable: true,
-        deletable: true,
-        title: income.title,
-        amount: income.amount,
-        pocketIds: [income.pocketId],
-        meta: getPocketName(state.pockets, income.pocketId),
-        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
-      })),
-      ...monthTransfers.map((transfer) => ({
-        id: transfer.id,
-        date: transfer.date,
-        kind: 'transferencia' as const,
-        source: 'transfer' as const,
-        editable: true,
-        deletable: true,
-        title: transfer.note || 'Transferencia interna',
-        amount: transfer.amount,
-        pocketIds: [transfer.fromPocketId, transfer.toPocketId],
-        meta: `${getPocketName(state.pockets, transfer.fromPocketId)} -> ${getPocketName(
-          state.pockets,
-          transfer.toPocketId,
-        )}`,
-        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
-      })),
-    ]
+	  const activity = useMemo(() => {
+	    const items = [
+	      ...monthExpenses.map((expense) => ({
+	        id: expense.id,
+	        date: expense.date,
+	        time: expense.time,
+	        kind: 'gasto' as const,
+	        source: expense.source,
+	        editable: expense.source === 'manual' || expense.source === 'wallet',
+	        deletable: expense.source === 'manual' || expense.source === 'wallet',
+	        title: expense.description,
+	        amount: -expense.amount,
+	        pocketIds: [expense.pocketId],
+	        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)} · ${getPocketMethod(
+	          state.pockets,
+	          expense.pocketId,
+	        )}`,
+	        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
+	      })),
+	      ...monthIncomes.map((income) => ({
+	        id: income.id,
+	        date: income.date,
+	        time: income.time,
+	        kind: 'ingreso' as const,
+	        source: 'manual' as const,
+	        editable: true,
+	        deletable: true,
+	        title: income.title,
+	        amount: income.amount,
+	        pocketIds: [income.pocketId],
+	        meta: `${getPocketName(state.pockets, income.pocketId)} · ${getPocketMethod(
+	          state.pockets,
+	          income.pocketId,
+	        )}`,
+	        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
+	      })),
+	      ...monthTransfers.map((transfer) => ({
+	        id: transfer.id,
+	        date: transfer.date,
+	        time: transfer.time,
+	        kind: 'transferencia' as const,
+	        source: 'transfer' as const,
+	        editable: true,
+	        deletable: true,
+	        title: transfer.note || 'Transferencia interna',
+	        amount: transfer.amount,
+	        pocketIds: [transfer.fromPocketId, transfer.toPocketId],
+	        meta: `${getPocketName(state.pockets, transfer.fromPocketId)} (${getPocketMethod(
+	          state.pockets,
+	          transfer.fromPocketId,
+	        )}) -> ${getPocketName(state.pockets, transfer.toPocketId)} (${getPocketMethod(
+	          state.pockets,
+	          transfer.toPocketId,
+	        )})`,
+	        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
+	      })),
+	    ]
 
-    return items.sort((a, b) => (a.date < b.date ? 1 : -1))
-  }, [monthExpenses, monthIncomes, monthTransfers, state.pockets])
+	    return items.sort((a, b) => {
+	      const aKey = `${a.date}T${normalizeTimeHHmm(a.time)}`
+	      const bKey = `${b.date}T${normalizeTimeHHmm(b.time)}`
+	      if (aKey === bKey) return 0
+	      return aKey < bKey ? 1 : -1
+	    })
+	  }, [monthExpenses, monthIncomes, monthTransfers, state.pockets])
 
-  const movementActivity = useMemo(() => {
-    const items = [
-      ...movementMonthExpenses.map((expense) => ({
-        id: expense.id,
-        date: expense.date,
-        kind: 'gasto' as const,
-        source: expense.source,
-        editable: expense.source === 'manual' || expense.source === 'wallet',
-        deletable: expense.source === 'manual' || expense.source === 'wallet',
-        title: expense.description,
-        amount: -expense.amount,
-        pocketIds: [expense.pocketId],
-        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)}`,
-        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
-      })),
-      ...movementMonthIncomes.map((income) => ({
-        id: income.id,
-        date: income.date,
-        kind: 'ingreso' as const,
-        source: 'manual' as const,
-        editable: true,
-        deletable: true,
-        title: income.title,
-        amount: income.amount,
-        pocketIds: [income.pocketId],
-        meta: getPocketName(state.pockets, income.pocketId),
-        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
-      })),
-      ...movementMonthTransfers.map((transfer) => ({
-        id: transfer.id,
-        date: transfer.date,
-        kind: 'transferencia' as const,
-        source: 'transfer' as const,
-        editable: true,
-        deletable: true,
-        title: transfer.note || 'Transferencia interna',
-        amount: transfer.amount,
-        pocketIds: [transfer.fromPocketId, transfer.toPocketId],
-        meta: `${getPocketName(state.pockets, transfer.fromPocketId)} -> ${getPocketName(
-          state.pockets,
-          transfer.toPocketId,
-        )}`,
-        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
-      })),
-    ]
+	  const movementActivity = useMemo(() => {
+	    const items = [
+	      ...movementMonthExpenses.map((expense) => ({
+	        id: expense.id,
+	        date: expense.date,
+	        time: expense.time,
+	        kind: 'gasto' as const,
+	        source: expense.source,
+	        editable: expense.source === 'manual' || expense.source === 'wallet',
+	        deletable: expense.source === 'manual' || expense.source === 'wallet',
+	        title: expense.description,
+	        amount: -expense.amount,
+	        pocketIds: [expense.pocketId],
+	        meta: `${expense.category} · ${getPocketName(state.pockets, expense.pocketId)} · ${getPocketMethod(
+	          state.pockets,
+	          expense.pocketId,
+	        )}`,
+	        detail: `Salida ${expense.source} · confianza ${Math.round(expense.confidence * 100)}%`,
+	      })),
+	      ...movementMonthIncomes.map((income) => ({
+	        id: income.id,
+	        date: income.date,
+	        time: income.time,
+	        kind: 'ingreso' as const,
+	        source: 'manual' as const,
+	        editable: true,
+	        deletable: true,
+	        title: income.title,
+	        amount: income.amount,
+	        pocketIds: [income.pocketId],
+	        meta: `${getPocketName(state.pockets, income.pocketId)} · ${getPocketMethod(
+	          state.pockets,
+	          income.pocketId,
+	        )}`,
+	        detail: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
+	      })),
+	      ...movementMonthTransfers.map((transfer) => ({
+	        id: transfer.id,
+	        date: transfer.date,
+	        time: transfer.time,
+	        kind: 'transferencia' as const,
+	        source: 'transfer' as const,
+	        editable: true,
+	        deletable: true,
+	        title: transfer.note || 'Transferencia interna',
+	        amount: transfer.amount,
+	        pocketIds: [transfer.fromPocketId, transfer.toPocketId],
+	        meta: `${getPocketName(state.pockets, transfer.fromPocketId)} (${getPocketMethod(
+	          state.pockets,
+	          transfer.fromPocketId,
+	        )}) -> ${getPocketName(state.pockets, transfer.toPocketId)} (${getPocketMethod(
+	          state.pockets,
+	          transfer.toPocketId,
+	        )})`,
+	        detail: transfer.note.trim() || 'Movimiento interno entre bolsillos',
+	      })),
+	    ]
 
-    return items.sort((a, b) => (a.date < b.date ? 1 : -1))
-  }, [movementMonthExpenses, movementMonthIncomes, movementMonthTransfers, state.pockets])
+	    return items.sort((a, b) => {
+	      const aKey = `${a.date}T${normalizeTimeHHmm(a.time)}`
+	      const bKey = `${b.date}T${normalizeTimeHHmm(b.time)}`
+	      if (aKey === bKey) return 0
+	      return aKey < bKey ? 1 : -1
+	    })
+	  }, [movementMonthExpenses, movementMonthIncomes, movementMonthTransfers, state.pockets])
 
   const selectedPocket = state.pockets.find((pocket) => pocket.id === selectedPocketId) ?? state.pockets[0]
 
-  const filteredActivity = useMemo(() => {
-    return movementActivity
-      .filter((item) => {
-        const matchesPocket =
-          movementFilters.pocketId === 'todos' || item.pocketIds.includes(movementFilters.pocketId)
-        const matchesKind = movementFilters.kind === 'todos' || item.kind === movementFilters.kind
-        return matchesPocket && matchesKind
-      })
-      .map((item) => {
-        if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
-          return item
-        }
+	  const filteredActivity = useMemo(() => {
+	    const normalizedQuery = normalize(movementFilters.query)
+
+	    return movementActivity
+	      .filter((item) => {
+	        const matchesPocket =
+	          movementFilters.pocketId === 'todos' || item.pocketIds.includes(movementFilters.pocketId)
+	        const matchesKind = movementFilters.kind === 'todos' || item.kind === movementFilters.kind
+	        const matchesDate = !movementFilters.date || item.date === movementFilters.date
+	        const matchesQuery =
+	          !normalizedQuery ||
+	          normalize(item.title).includes(normalizedQuery) ||
+	          normalize(item.meta).includes(normalizedQuery) ||
+	          normalize(item.detail).includes(normalizedQuery)
+	        const matchesPocketType =
+	          movementFilters.pocketType === 'todos' ||
+	          item.pocketIds.some((pocketId) => {
+	            const pocketType = state.pockets.find((pocket) => pocket.id === pocketId)?.type
+	            return pocketType === movementFilters.pocketType
+	          })
+
+	        return matchesPocket && matchesKind && matchesDate && matchesQuery && matchesPocketType
+	      })
+	      .map((item) => {
+	        if (item.kind !== 'transferencia' || movementFilters.pocketId === 'todos') {
+	          return item
+	        }
 
         const transfer = state.transfers.find((entry) => entry.id === item.id)
         if (!transfer) return item
@@ -948,15 +1026,24 @@ function App() {
           ? getPocketName(state.pockets, transfer.toPocketId)
           : getPocketName(state.pockets, transfer.fromPocketId)
 
-        return {
-          ...item,
-          amount: signedAmount,
-          detail: isOutgoing
-            ? `Salida por transferencia hacia ${transferPocketName}`
-            : `Entrada por transferencia desde ${transferPocketName}`,
-        }
-      })
-  }, [movementActivity, movementFilters.kind, movementFilters.pocketId, state.pockets, state.transfers])
+	        return {
+	          ...item,
+	          amount: signedAmount,
+	          detail: isOutgoing
+	            ? `Salida por transferencia hacia ${transferPocketName}`
+	            : `Entrada por transferencia desde ${transferPocketName}`,
+	        }
+	      })
+	  }, [
+	    movementActivity,
+	    movementFilters.date,
+	    movementFilters.kind,
+	    movementFilters.pocketId,
+	    movementFilters.pocketType,
+	    movementFilters.query,
+	    state.pockets,
+	    state.transfers,
+	  ])
 
   const movementSummary = useMemo(() => {
     const inflow = filteredActivity
@@ -1435,12 +1522,13 @@ function App() {
     const numericAmount = Number(expenseForm.amount)
     if (!expenseForm.description.trim() || numericAmount <= 0) return
 
-    const expenseDate = expenseForm.date || today
-    const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
+	    const expenseDate = expenseForm.date || today
+	    const fallbackTime = getCurrentTimeHHmm()
+	    const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
 
-    const executeAddExpense = () => {
-      setState((current) => {
-        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
+	    const executeAddExpense = () => {
+	      setState((current) => {
+	        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
         const selectedCategory = expenseForm.category
         const selectedConfidence = getCategoryConfidenceForSelection(
           selectedCategory,
@@ -1448,16 +1536,17 @@ function App() {
           suggestion.confidence,
         )
         const learnedKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
-        const expense: Expense = {
-          id: expenseForm.id || crypto.randomUUID(),
-          description: expenseForm.description.trim(),
-          amount: numericAmount,
-          pocketId: expenseForm.pocketId,
-          date: expenseDate,
-          source: currentExpense?.source ?? 'manual',
-          category: selectedCategory,
-          confidence: selectedConfidence,
-        }
+	        const expense: Expense = {
+	          id: expenseForm.id || crypto.randomUUID(),
+	          description: expenseForm.description.trim(),
+	          amount: numericAmount,
+	          pocketId: expenseForm.pocketId,
+	          date: expenseDate,
+	          time: currentExpense?.time ?? fallbackTime,
+	          source: currentExpense?.source ?? 'manual',
+	          category: selectedCategory,
+	          confidence: selectedConfidence,
+	        }
 
         const learningRules = [...current.learningRules]
         learnedKeywords.forEach((keyword) => {
@@ -1507,19 +1596,21 @@ function App() {
     const numericAmount = Number(incomeForm.amount)
     if (!incomeForm.title.trim() || numericAmount <= 0) return
 
-    const incomeDate = incomeForm.date || today
-    const isRetroactive = incomeDate.slice(0, 7) < currentMonthKey
+	    const incomeDate = incomeForm.date || today
+	    const fallbackTime = getCurrentTimeHHmm()
+	    const isRetroactive = incomeDate.slice(0, 7) < currentMonthKey
 
     const executeAddIncome = () => {
       setState((current) => {
-        const income: Income = {
-          id: incomeForm.id || crypto.randomUUID(),
-          title: incomeForm.title.trim(),
-          amount: numericAmount,
-          pocketId: incomeForm.pocketId,
-          date: incomeDate,
-          recurring: incomeForm.recurring,
-        }
+	        const income: Income = {
+	          id: incomeForm.id || crypto.randomUUID(),
+	          title: incomeForm.title.trim(),
+	          amount: numericAmount,
+	          pocketId: incomeForm.pocketId,
+	          date: incomeDate,
+	          time: current.incomes.find((item) => item.id === incomeForm.id)?.time ?? fallbackTime,
+	          recurring: incomeForm.recurring,
+	        }
 
         return {
           ...current,
@@ -1556,19 +1647,22 @@ function App() {
       return
     }
 
-    const transferDate = transferForm.date || today
-    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
+	    const transferDate = transferForm.date || today
+	    const fallbackTime = getCurrentTimeHHmm()
+	    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
 
-    const executeAddTransfer = () => {
-      setState((current) => {
-        const transfer: Transfer = {
-          id: transferForm.id || crypto.randomUUID(),
-          fromPocketId: transferForm.fromPocketId,
-          toPocketId: transferForm.toPocketId,
-          amount: numericAmount,
-          date: transferDate,
-          note: transferForm.note.trim(),
-        }
+	    const executeAddTransfer = () => {
+	      setState((current) => {
+	        const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
+	        const transfer: Transfer = {
+	          id: transferForm.id || crypto.randomUUID(),
+	          fromPocketId: transferForm.fromPocketId,
+	          toPocketId: transferForm.toPocketId,
+	          amount: numericAmount,
+	          date: transferDate,
+	          time: currentTransfer?.time ?? fallbackTime,
+	          note: transferForm.note.trim(),
+	        }
 
         return {
           ...current,
@@ -1703,16 +1797,17 @@ function App() {
 
       if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return current
 
-      const expense: Expense = {
-        id: crypto.randomUUID(),
-        description: fixed.title,
-        amount: fixed.amount,
-        pocketId: paymentPocketId || fixed.pocketId,
-        date: effectiveDate,
-        source: 'fixed',
-        category: fixed.category,
-        confidence: 1,
-      }
+	      const expense: Expense = {
+	        id: crypto.randomUUID(),
+	        description: fixed.title,
+	        amount: fixed.amount,
+	        pocketId: paymentPocketId || fixed.pocketId,
+	        date: effectiveDate,
+	        time: getCurrentTimeHHmm(),
+	        source: 'fixed',
+	        category: fixed.category,
+	        confidence: 1,
+	      }
 
       return {
         ...current,
@@ -1794,16 +1889,17 @@ function App() {
       const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
       if (paymentAmount <= 0) return current
 
-      const expense: Expense = {
-        id: crypto.randomUUID(),
-        description: `Abono deuda: ${debt.title}`,
-        amount: paymentAmount,
-        pocketId: debt.pocketId,
-        date: today,
-        source: 'debt',
-        category: debt.category,
-        confidence: 1,
-      }
+	      const expense: Expense = {
+	        id: crypto.randomUUID(),
+	        description: `Abono deuda: ${debt.title}`,
+	        amount: paymentAmount,
+	        pocketId: debt.pocketId,
+	        date: today,
+	        time: getCurrentTimeHHmm(),
+	        source: 'debt',
+	        category: debt.category,
+	        confidence: 1,
+	      }
 
       return {
         ...current,
@@ -2123,15 +2219,19 @@ function App() {
                     placeholder="Ej. Uber oficina, mercado, restaurante"
                   />
                 </label>
-                <label>
-                  Monto
-                  <input
-                    type="number"
-                    value={expenseForm.amount}
-                    onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))}
-                    placeholder="85000"
-                  />
-                </label>
+	                <label>
+	                  Monto
+	                  <input
+	                    type="text"
+	                    inputMode="numeric"
+	                    pattern="[0-9]*"
+	                    value={expenseForm.amount}
+	                    onChange={(event) =>
+	                      setExpenseForm((current) => ({ ...current, amount: keepOnlyDigits(event.target.value) }))
+	                    }
+	                    placeholder="85000"
+	                  />
+	                </label>
                 <label>
                   Bolsillo
                   <select
@@ -2292,15 +2392,19 @@ function App() {
                     placeholder="Ej. nomina, freelance, devolucion"
                   />
                 </label>
-                <label>
-                  Monto
-                  <input
-                    type="number"
-                    value={incomeForm.amount}
-                    onChange={(event) => setIncomeForm((current) => ({ ...current, amount: event.target.value }))}
-                    placeholder="5200000"
-                  />
-                </label>
+	                <label>
+	                  Monto
+	                  <input
+	                    type="text"
+	                    inputMode="numeric"
+	                    pattern="[0-9]*"
+	                    value={incomeForm.amount}
+	                    onChange={(event) =>
+	                      setIncomeForm((current) => ({ ...current, amount: keepOnlyDigits(event.target.value) }))
+	                    }
+	                    placeholder="5200000"
+	                  />
+	                </label>
                 <label>
                   Bolsillo destino
                   <select
@@ -2432,15 +2536,19 @@ function App() {
                     ))}
                   </select>
                 </label>
-                <label>
-                  Monto
-                  <input
-                    type="number"
-                    value={transferForm.amount}
-                    onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))}
-                    placeholder="250000"
-                  />
-                </label>
+	                <label>
+	                  Monto
+	                  <input
+	                    type="text"
+	                    inputMode="numeric"
+	                    pattern="[0-9]*"
+	                    value={transferForm.amount}
+	                    onChange={(event) =>
+	                      setTransferForm((current) => ({ ...current, amount: keepOnlyDigits(event.target.value) }))
+	                    }
+	                    placeholder="250000"
+	                  />
+	                </label>
                 <label>
                   Nota
                   <input
@@ -2527,15 +2635,19 @@ function App() {
             />
           </label>
           <div className="form-grid three">
-            <label>
-              Monto mensual
-              <input
-                type="number"
-                value={fixedForm.amount}
-                onChange={(event) => setFixedForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="184000"
-              />
-            </label>
+	            <label>
+	              Monto mensual
+	              <input
+	                type="text"
+	                inputMode="numeric"
+	                pattern="[0-9]*"
+	                value={fixedForm.amount}
+	                onChange={(event) =>
+	                  setFixedForm((current) => ({ ...current, amount: keepOnlyDigits(event.target.value) }))
+	                }
+	                placeholder="184000"
+	              />
+	            </label>
             <label>
               Dia de pago
               <input
@@ -3672,14 +3784,85 @@ function App() {
           </div>
         </section>
 
-        <section className="movement-content-stack">
-          <section className="panel banking-panel movement-ledger-panel">
-            <div className="panel-header">
-              <div>
-                <h2>Movimientos detallado</h2>
-              </div>
-            </div>
-            <div className="ledger simple-movement-list">
+	        <section className="movement-content-stack">
+	          <section className="panel banking-panel movement-ledger-panel">
+	            <div className="panel-header">
+	              <div>
+	                <h2>Movimientos detallado</h2>
+	              </div>
+	              <div className="movement-filter-layout simplified detailed-filters-row">
+	                <div className="filter-field compact inline">
+	                  <span className="filter-field-label">Detalle</span>
+	                  <input
+	                    type="search"
+	                    value={movementFilters.query}
+	                    onChange={(event) =>
+	                      setMovementFilters((current) => ({ ...current, query: event.target.value }))
+	                    }
+	                    placeholder="Buscar por detalle..."
+	                  />
+	                </div>
+	                <div className="filter-field compact inline">
+	                  <span className="filter-field-label">Fecha</span>
+	                  <div className="date-input-shell">
+	                    <div className="date-input-display" aria-hidden="true">
+	                      <span>
+	                        {movementFilters.date ? formatDateInputDisplay(movementFilters.date) : 'Todas'}
+	                      </span>
+	                      <LuCalendar />
+	                    </div>
+	                    <input
+	                      ref={movementFilterDateInputRef}
+	                      className="date-input-native-overlay"
+	                      type="date"
+	                      value={movementFilters.date}
+	                      aria-label="Filtrar por fecha"
+	                      onChange={(event) =>
+	                        setMovementFilters((current) => ({ ...current, date: event.target.value }))
+	                      }
+	                      onClick={() => movementFilterDateInputRef.current?.showPicker?.()}
+	                    />
+	                  </div>
+	                </div>
+	                <div className="filter-field compact inline">
+	                  <span className="filter-field-label">Metodo</span>
+	                  <div className="filter-select-wrap">
+	                    <select
+	                      value={movementFilters.pocketType}
+	                      onChange={(event) =>
+	                        setMovementFilters((current) => ({
+	                          ...current,
+	                          pocketType: event.target.value as 'todos' | PocketType,
+	                        }))
+	                      }
+	                    >
+	                      <option value="todos">Todos</option>
+	                      <option value="daily">{describePocketType('daily')}</option>
+	                      <option value="savings">{describePocketType('savings')}</option>
+	                      <option value="fixed">{describePocketType('fixed')}</option>
+	                      <option value="invest">{describePocketType('invest')}</option>
+	                    </select>
+	                  </div>
+	                </div>
+	                {(movementFilters.query || movementFilters.date || movementFilters.pocketType !== 'todos') && (
+	                  <button
+	                    type="button"
+	                    className="text-link"
+	                    onClick={() =>
+	                      setMovementFilters((current) => ({
+	                        ...current,
+	                        query: '',
+	                        date: '',
+	                        pocketType: 'todos',
+	                      }))
+	                    }
+	                  >
+	                    Limpiar
+	                  </button>
+	                )}
+	              </div>
+	            </div>
+	            <div className="ledger simple-movement-list">
               {filteredActivity.map((item) => (
                 <article key={item.kind + item.id} className={`simple-movement-row ${item.kind}`}>
                   <div className="simple-movement-top">
@@ -3747,14 +3930,17 @@ function App() {
                         </div>
                       )}
                     </div>
-                  </div>
-                  <div className="simple-movement-meta">
-                    <p>{item.date}</p>
-                    <strong className={item.kind === 'ingreso' ? 'simple-income' : 'simple-outflow'}>
-                      {item.kind === 'ingreso' ? '+' : '-'}
-                      {money.format(Math.abs(item.amount))}
-                    </strong>
-                  </div>
+	                  </div>
+	                  <div className="simple-movement-meta">
+	                    <div className="simple-movement-meta-text">
+	                      <p>{formatMovementDateTimeDisplay(item.date, item.time)}</p>
+	                      <p className="simple-movement-method">{item.meta}</p>
+	                    </div>
+	                    <strong className={item.kind === 'ingreso' ? 'simple-income' : 'simple-outflow'}>
+	                      {item.kind === 'ingreso' ? '+' : '-'}
+	                      {money.format(Math.abs(item.amount))}
+	                    </strong>
+	                  </div>
                 </article>
               ))}
               {filteredActivity.length === 0 && (

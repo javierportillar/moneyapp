@@ -21,6 +21,7 @@ export type Expense = {
   amount: number
   pocketId: string
   date: string
+  time?: string
   source: 'manual' | 'wallet' | 'fixed' | 'debt'
   category: Category
   confidence: number
@@ -52,6 +53,7 @@ export type Income = {
   amount: number
   pocketId: string
   date: string
+  time?: string
   recurring: boolean
 }
 
@@ -61,6 +63,7 @@ export type Transfer = {
   toPocketId: string
   amount: number
   date: string
+  time?: string
   note: string
 }
 
