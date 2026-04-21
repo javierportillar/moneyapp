@@ -1528,6 +1528,24 @@ function App() {
     const fallbackTime = getCurrentTimeHHmm()
     const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
 
+    const pocketId = expenseForm.pocketId
+    const pocketName = getPocketName(state.pockets, pocketId)
+    const currentExpense = expenseForm.id
+      ? state.expenses.find((item) => item.id === expenseForm.id)
+      : undefined
+    const availableBalance =
+      (pocketBalances[pocketId] ?? 0) +
+      (currentExpense && currentExpense.pocketId === pocketId ? currentExpense.amount : 0)
+
+    if (numericAmount > availableBalance) {
+      window.alert(
+        `Saldo insuficiente. El bolsillo "${pocketName}" tiene ${money.format(
+          availableBalance,
+        )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`,
+      )
+      return
+    }
+
     const executeAddExpense = () => {
       setState((current) => {
         const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
@@ -1654,6 +1672,24 @@ function App() {
 	    const transferDate = transferForm.date || today
 	    const fallbackTime = getCurrentTimeHHmm()
 	    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
+
+    const fromPocketId = transferForm.fromPocketId
+    const fromPocketName = getPocketName(state.pockets, fromPocketId)
+    const existingTransfer = transferForm.id
+      ? state.transfers.find((item) => item.id === transferForm.id)
+      : undefined
+    const availableBalance =
+      (pocketBalances[fromPocketId] ?? 0) +
+      (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
+
+    if (numericAmount > availableBalance) {
+      window.alert(
+        `Saldo insuficiente. El bolsillo "${fromPocketName}" tiene ${money.format(
+          availableBalance,
+        )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`,
+      )
+      return
+    }
 
 	    const executeAddTransfer = () => {
 	      setState((current) => {
@@ -1794,6 +1830,20 @@ function App() {
   }
 
   function handlePayFixedExpense(fixedId: string, paymentPocketId?: string, paymentDate?: string) {
+    const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
+    const targetPocketId = paymentPocketId || fixed?.pocketId
+    if (fixed && targetPocketId) {
+      const availableBalance = pocketBalances[targetPocketId] ?? 0
+      if (fixed.amount > availableBalance) {
+        window.alert(
+          `Saldo insuficiente. El bolsillo "${getPocketName(state.pockets, targetPocketId)}" tiene ${money.format(
+            availableBalance,
+          )} disponibles y estás intentando pagar ${money.format(fixed.amount)}.`,
+        )
+        return
+      }
+    }
+
     setState((current) => {
       const fixed = current.fixedExpenses.find((item) => item.id === fixedId)
       const effectiveDate = paymentDate || today
@@ -1801,11 +1851,29 @@ function App() {
 
       if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return current
 
+      const resolvedPocketId = paymentPocketId || fixed.pocketId
+      const resolvedBalance = (() => {
+        let balance = 0
+        current.incomes.forEach((income) => {
+          if (income.pocketId === resolvedPocketId) balance += income.amount
+        })
+        current.expenses.forEach((expense) => {
+          if (expense.pocketId === resolvedPocketId) balance -= expense.amount
+        })
+        current.transfers.forEach((transfer) => {
+          if (transfer.fromPocketId === resolvedPocketId) balance -= transfer.amount
+          if (transfer.toPocketId === resolvedPocketId) balance += transfer.amount
+        })
+        return balance
+      })()
+
+      if (fixed.amount > resolvedBalance) return current
+
 	      const expense: Expense = {
 	        id: crypto.randomUUID(),
 	        description: fixed.title,
 	        amount: fixed.amount,
-	        pocketId: paymentPocketId || fixed.pocketId,
+	        pocketId: resolvedPocketId,
 	        date: effectiveDate,
 	        time: getCurrentTimeHHmm(),
 	        source: 'fixed',
@@ -1885,6 +1953,23 @@ function App() {
   }
 
   function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
+    const snapshotDebt = state.debts.find((item) => item.id === debtId)
+    if (!snapshotDebt || !snapshotDebt.active || snapshotDebt.remainingAmount <= 0) return
+
+    const draftAmount = Number(debtPaymentDrafts[debtId] || snapshotDebt.installmentAmount)
+    const paymentAmount = Math.min(Math.max(draftAmount, 0), snapshotDebt.remainingAmount)
+    if (paymentAmount <= 0) return
+
+    const availableBalance = pocketBalances[snapshotDebt.pocketId] ?? 0
+    if (paymentAmount > availableBalance) {
+      window.alert(
+        `Saldo insuficiente. El bolsillo "${getPocketName(state.pockets, snapshotDebt.pocketId)}" tiene ${money.format(
+          availableBalance,
+        )} disponibles y estás intentando registrar ${money.format(paymentAmount)}.`,
+      )
+      return
+    }
+
     setState((current) => {
       const debt = current.debts.find((item) => item.id === debtId)
       if (!debt || !debt.active || debt.remainingAmount <= 0) return current
@@ -1892,6 +1977,24 @@ function App() {
       const draftAmount = Number(debtPaymentDrafts[debtId] || debt.installmentAmount)
       const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
       if (paymentAmount <= 0) return current
+
+      const resolvedPocketId = debt.pocketId
+      const resolvedBalance = (() => {
+        let balance = 0
+        current.incomes.forEach((income) => {
+          if (income.pocketId === resolvedPocketId) balance += income.amount
+        })
+        current.expenses.forEach((expense) => {
+          if (expense.pocketId === resolvedPocketId) balance -= expense.amount
+        })
+        current.transfers.forEach((transfer) => {
+          if (transfer.fromPocketId === resolvedPocketId) balance -= transfer.amount
+          if (transfer.toPocketId === resolvedPocketId) balance += transfer.amount
+        })
+        return balance
+      })()
+
+      if (paymentAmount > resolvedBalance) return current
 
 	      const expense: Expense = {
 	        id: crypto.randomUUID(),
@@ -4347,33 +4450,18 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
-          <SectionFrame
-            label="Resumen de deuda"
-            title="Saldo pendiente"
-            subtitle="Las deudas desaparecen automaticamente de la lista activa al llegar a 0."
-            collapsed={isSectionCollapsed('deudas-resumen')}
-            onToggle={() => toggleSection('deudas-resumen')}
-            emphasis
-          >
-            <div className="status-grid">
-              <div>
-                <span>Deuda total</span>
-                <strong>{money.format(totals.pendingDebt)}</strong>
-              </div>
-              <div>
-                <span>Cuotas del mes</span>
-                <strong>{money.format(monthlyDebtCommitment)}</strong>
-              </div>
-              <div>
-                <span>Activas</span>
-                <strong>{activeDebts.length}</strong>
-              </div>
-              <div>
-                <span>Saldadas</span>
-                <strong>{completedDebts.length}</strong>
-              </div>
-            </div>
-          </SectionFrame>
+          <div className="debt-register-cta">
+            <button
+              className="action-trigger ghost debt-register-trigger"
+              type="button"
+              onClick={() => {
+                resetDebtForm()
+                openComposerForView('deudas')
+              }}
+            >
+              Registrar deuda
+            </button>
+          </div>
 
           {openComposer === 'deudas' && (
             <FullscreenComposer
@@ -4381,6 +4469,8 @@ function App() {
               label="Nueva deuda"
               title={debtForm.id ? 'Editar deuda' : 'Registrar deuda'}
               description="Define saldo total, cuota estimada, bolsillo pagador y categoria asociada."
+              toolbarClassName="no-sticky"
+              bodyClassName="scroll-on-panel"
               onClose={() => {
                 resetDebtForm()
                 setOpenComposer(null)
@@ -4484,18 +4574,6 @@ function App() {
             subtitle={`${activeDebts.length} activa(s)`}
             collapsed={isSectionCollapsed('deudas-activas')}
             onToggle={() => toggleSection('deudas-activas')}
-            actions={
-              <button
-                className="action-trigger"
-                type="button"
-                onClick={() => {
-                  resetDebtForm()
-                  openComposerForView('deudas')
-                }}
-              >
-                Registrar deuda
-              </button>
-            }
           >
             <div className="debt-stack">
               {activeDebts.map((debt) => {
@@ -4690,6 +4768,34 @@ function App() {
               {completedDebts.length === 0 && (
                 <p className="empty-copy">Aun no tienes deudas saldadas en el historial.</p>
               )}
+            </div>
+          </SectionFrame>
+
+          <SectionFrame
+            label="Resumen de deuda"
+            title="Saldo pendiente"
+            subtitle="Las deudas desaparecen automaticamente de la lista activa al llegar a 0."
+            collapsed={isSectionCollapsed('deudas-resumen')}
+            onToggle={() => toggleSection('deudas-resumen')}
+            emphasis
+          >
+            <div className="status-grid">
+              <div>
+                <span>Deuda total</span>
+                <strong>{money.format(totals.pendingDebt)}</strong>
+              </div>
+              <div>
+                <span>Cuotas del mes</span>
+                <strong>{money.format(monthlyDebtCommitment)}</strong>
+              </div>
+              <div>
+                <span>Activas</span>
+                <strong>{activeDebts.length}</strong>
+              </div>
+              <div>
+                <span>Saldadas</span>
+                <strong>{completedDebts.length}</strong>
+              </div>
             </div>
           </SectionFrame>
         </div>
@@ -5306,16 +5412,6 @@ function App() {
               <p className="eyebrow">Panel financiero</p>
               <h1>{viewLabels[activeView]}</h1>
               <p className="view-description">{viewDescription}</p>
-            </div>
-            <div className="topbar-meta">
-              <div className="meta-chip">
-                <span>Obligaciones pendientes</span>
-                <strong>{money.format(totals.pendingFixed)}</strong>
-              </div>
-              <div className="meta-chip dark">
-                <span>Patrimonio</span>
-                <strong>{money.format(totals.pocketBalance)}</strong>
-              </div>
             </div>
           </header>
         )}

@@ -682,6 +682,13 @@ body {
   backdrop-filter: blur(10px);
 }
 
+.composer-toolbar.fullscreen.no-sticky {
+  position: relative;
+  top: auto;
+  background: transparent;
+  backdrop-filter: none;
+}
+
 .composer-toolbar-minimal {
   justify-content: flex-end;
   align-items: flex-start;
@@ -3001,6 +3008,12 @@ body {
   .fullscreen-composer-body {
     flex: 1;
     overflow-y: auto;
+  }
+
+  /* Some composers need the header to scroll away with the content (avoid nested scroll). */
+  .fullscreen-composer-body.scroll-on-panel {
+    flex: 0 0 auto;
+    overflow-y: visible;
   }
 
   .movement-form-layout {
@@ -5333,6 +5346,33 @@ body {
   display: flex;
   gap: 8px;
   z-index: 2;
+}
+
+.section-frame-actions-corner .action-trigger,
+.section-frame-actions-corner .secondary-button {
+  width: auto !important;
+  min-width: 0;
+}
+
+.debt-register-cta {
+  margin-top: -10px;
+  margin-bottom: 12px;
+  display: flex;
+}
+
+.debt-register-cta .debt-register-trigger {
+  width: 100%;
+  justify-content: center;
+}
+
+.debt-register-trigger {
+  padding: 10px 14px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.debt-register-trigger:hover {
+  background: rgba(239, 246, 255, 0.14);
 }
 
 .section-frame-copy {
