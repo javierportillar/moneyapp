@@ -443,6 +443,9 @@ function App() {
   const [activeView, setActiveView] = useState<ViewKey>('resumen')
   const [activeModule, setActiveModule] = useState<ModuleKey>('gasto')
   const [openComposer, setOpenComposer] = useState<ComposerView | null>(null)
+  const [openObligationMetric, setOpenObligationMetric] = useState<
+    null | 'pending' | 'active' | 'paid' | 'paused'
+  >(null)
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
   const [openPocketDetailId, setOpenPocketDetailId] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
@@ -4207,140 +4210,157 @@ function App() {
 
         <section className="dashboard-grid">
           <div className="primary-column">
-            <section className="panel banking-panel">
-            <div className="panel-header">
-              <div>
-                <span className="micro-label">Calendario financiero</span>
-                <h2>Obligaciones</h2>
-              </div>
-              <div className="panel-header-actions">
-                <p>{fixedStatus.pending.length} pendientes este mes</p>
-                <button
-                  className="action-trigger"
-                  type="button"
-                  onClick={() => {
-                    resetFixedForm()
-                    openComposerForView('programacion', 'fijos')
-                  }}
-                >
-                  Registrar obligacion
-                </button>
-              </div>
+            <div className="obligation-register-cta">
+              <button
+                className="action-trigger"
+                type="button"
+                onClick={() => {
+                  resetFixedForm()
+                  openComposerForView('programacion', 'fijos')
+                }}
+              >
+                Registrar obligacion
+              </button>
             </div>
-            <section className="obligation-overview-board">
-              <article className="obligation-hero-card">
-                <div className="obligation-hero-head">
-                  <div>
-                    <span className="micro-label">Carga mensual</span>
-                    <h3>{money.format(obligationSummary.totalActiveAmount)}</h3>
-                  </div>
-                  <small>{fixedStatus.pending.length} por confirmar este mes</small>
-                </div>
-                <div className="obligation-hero-metrics">
-                  <div>
-                    <span>Pendiente</span>
-                    <strong>{money.format(obligationSummary.totalPendingAmount)}</strong>
-                  </div>
-                  <div>
-                    <span>Activas</span>
-                    <strong>{fixedStatus.activeItems.length}</strong>
-                  </div>
-                  <div>
-                    <span>Pagadas</span>
-                    <strong>{fixedStatus.paid.length}</strong>
-                  </div>
-                  <div>
-                    <span>Pausadas</span>
-                    <strong>{fixedStatus.paused.length}</strong>
-                  </div>
-                </div>
-              </article>
 
-              <div className="obligation-insight-grid">
-                <article className="summary-box accent">
-                  <span>Dia con mayor carga</span>
-                  <strong>
-                    {obligationSummary.heaviestDueDay
-                      ? `Dia ${obligationSummary.heaviestDueDay.day}`
-                      : 'Sin carga'}
-                  </strong>
-                  <p className="movement-detail">
-                    {obligationSummary.heaviestDueDay
-                      ? money.format(obligationSummary.heaviestDueDay.total)
-                      : 'Aun no hay obligaciones activas'}
-                  </p>
-                </article>
-                <article className="summary-box">
-                  <span>Obligacion mas pesada</span>
-                  <strong>{obligationSummary.highestObligation?.title ?? 'Sin datos'}</strong>
-                  <p className="movement-detail">
-                    {obligationSummary.highestObligation
-                      ? money.format(obligationSummary.highestObligation.amount)
-                      : 'Sin obligaciones activas'}
-                  </p>
-                </article>
-                <article className="summary-box">
-                  <span>En revision hoy</span>
-                  <strong>{fixedStatus.review.length}</strong>
-                  <p className="movement-detail">
-                    {fixedStatus.overdue.length} vencida(s) y {fixedStatus.pending.length - fixedStatus.overdue.length}{' '}
-                    pendiente(s)
-                  </p>
-                </article>
+            <SectionFrame
+              label="Obligaciones"
+              title="Obligaciones pendientes"
+              subtitle={`${fixedStatus.pending.length} por confirmar este mes`}
+              collapsed={isSectionCollapsed('programacion-pendientes')}
+              onToggle={() => toggleSection('programacion-pendientes')}
+              className="obligation-list-board"
+            >
+              <div className="fixed-stack">
+                {fixedStatus.pending
+                  .slice()
+                  .sort((a, b) => a.dueDay - b.dueDay)
+                  .map((item) => {
+                    const isDueOrPast = item.dueDay <= currentDay
+                    const isLate = item.dueDay < currentDay
+
+                    return (
+                      <article
+                        key={item.id}
+                        className={isLate ? 'obligation-row late-row' : 'obligation-row'}
+                      >
+                        <div className="obligation-header">
+                          <div className="obligation-title">
+                            <strong>{item.title}</strong>
+                            <p className="obligation-subtitle">
+                              {getPocketName(state.pockets, item.pocketId)} · {item.category}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="edit-icon-button obligation-edit"
+                            aria-label={`Editar obligacion ${item.title}`}
+                            onClick={() => startEditFixedExpense(item.id)}
+                          >
+                            <LuPencil />
+                          </button>
+                        </div>
+
+                        <div className="obligation-meta">
+                          <span className="obligation-chip">Pago dia {item.dueDay}</span>
+                          <span className="obligation-chip">Confirmar dia {item.confirmationDay}</span>
+                        </div>
+
+                        <div className="obligation-footer">
+                          <div className="obligation-amount">
+                            <span className="obligation-amount-value">{money.format(item.amount)}</span>
+                            <small className={isLate ? 'late' : 'pending'}>{isLate ? 'Vencido' : 'Pendiente'}</small>
+                          </div>
+
+                          <div className="obligation-actions">
+                            <button
+                              type="button"
+                              className={
+                                isDueOrPast
+                                  ? 'action-trigger obligation-primary warning-button'
+                                  : 'action-trigger obligation-primary'
+                              }
+                              onClick={() => openFixedPaymentConfirmation(item.id)}
+                            >
+                              {isDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button slim obligation-secondary"
+                              onClick={() => handleToggleFixedExpense(item.id)}
+                            >
+                              Pausar
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                {fixedStatus.pending.length === 0 && (
+                  <p className="empty-copy">No hay obligaciones pendientes por confirmar.</p>
+                )}
               </div>
-            </section>
+            </SectionFrame>
 
-            <section className="obligation-agenda-grid">
-              <article className="panel banking-panel obligation-agenda-panel">
-                <div className="panel-header">
-                  <div>
-                    <span className="micro-label">Agenda</span>
-                    <h3>Proximos pagos</h3>
-                  </div>
-                </div>
-                <div className="obligation-agenda-list">
-                  {obligationSummary.nextDeadlines.map((item) => (
-                    <div key={item.id} className="compact-pocket-row obligation-agenda-row">
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p className="movement-detail">
-                          Dia {item.dueDay} · {getPocketName(state.pockets, item.pocketId)}
-                        </p>
+            <SectionFrame
+              label="Obligaciones"
+              title="Obligaciones pagadas"
+              subtitle={`${fixedStatus.paid.length} confirmada(s) este mes`}
+              collapsed={isSectionCollapsed('programacion-pagadas')}
+              onToggle={() => toggleSection('programacion-pagadas')}
+              className="obligation-list-board"
+            >
+              <div className="fixed-stack">
+                {fixedStatus.paid
+                  .slice()
+                  .sort((a, b) => a.dueDay - b.dueDay)
+                  .map((item) => (
+                    <article key={item.id} className="obligation-row">
+                      <div className="obligation-header">
+                        <div className="obligation-title">
+                          <strong>{item.title}</strong>
+                          <p className="obligation-subtitle">
+                            {getPocketName(state.pockets, item.pocketId)} · {item.category}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="edit-icon-button obligation-edit"
+                          aria-label={`Editar obligacion ${item.title}`}
+                          onClick={() => startEditFixedExpense(item.id)}
+                        >
+                          <LuPencil />
+                        </button>
                       </div>
-                      <span>{money.format(item.amount)}</span>
-                    </div>
-                  ))}
-                  {obligationSummary.nextDeadlines.length === 0 && (
-                    <p className="empty-copy">No hay pagos pendientes por agendar.</p>
-                  )}
-                </div>
-              </article>
 
-              <article className="panel banking-panel obligation-agenda-panel">
-                <div className="panel-header">
-                  <div>
-                    <span className="micro-label">Control</span>
-                    <h3>Proximas confirmaciones</h3>
-                  </div>
-                </div>
-                <div className="obligation-agenda-list">
-                  {obligationSummary.nextConfirmations.map((item) => (
-                    <div key={item.id} className="compact-pocket-row obligation-agenda-row">
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p className="movement-detail">
-                          Confirmar dia {item.confirmationDay} · {item.category}
-                        </p>
+                      <div className="obligation-meta">
+                        <span className="obligation-chip">Pago dia {item.dueDay}</span>
+                        <span className="obligation-chip">Confirmar dia {item.confirmationDay}</span>
                       </div>
-                      <span>{money.format(item.amount)}</span>
-                    </div>
+
+                      <div className="obligation-footer">
+                        <div className="obligation-amount">
+                          <span className="obligation-amount-value">{money.format(item.amount)}</span>
+                          <small className="paid">Pagado</small>
+                        </div>
+
+                        <div className="obligation-actions">
+                          <button
+                            type="button"
+                            className="secondary-button slim obligation-secondary"
+                            onClick={() => handleToggleFixedExpense(item.id)}
+                          >
+                            {item.active ? 'Pausar' : 'Reactivar'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
                   ))}
-                  {obligationSummary.nextConfirmations.length === 0 && (
-                    <p className="empty-copy">No hay confirmaciones pendientes.</p>
-                  )}
-                </div>
-              </article>
-            </section>
+                {fixedStatus.paid.length === 0 && (
+                  <p className="empty-copy">Aun no has confirmado pagos este mes.</p>
+                )}
+              </div>
+            </SectionFrame>
 
             <SectionFrame
               label="Listado operativo"
@@ -4421,7 +4441,259 @@ function App() {
                 })}
               </div>
             </SectionFrame>
-            </section>
+
+            <SectionFrame
+              label="Panorama"
+              title="Carga mensual"
+              subtitle={`${fixedStatus.pending.length} pendiente(s) · ${fixedStatus.overdue.length} vencida(s) · ${fixedStatus.paid.length} pagada(s)`}
+              collapsed={isSectionCollapsed('programacion-panorama')}
+              onToggle={() => toggleSection('programacion-panorama')}
+            >
+              <section className="obligation-overview-board">
+                <article className="obligation-hero-card">
+                  <div className="obligation-hero-head">
+                    <div>
+                      <span className="micro-label">Carga mensual</span>
+                      <h3>{money.format(obligationSummary.totalActiveAmount)}</h3>
+                    </div>
+                    <small>{fixedStatus.pending.length} por confirmar este mes</small>
+                  </div>
+                  <div className="obligation-hero-metrics">
+                    <button
+                      type="button"
+                      className={openObligationMetric === 'pending' ? 'obligation-metric-tile is-open' : 'obligation-metric-tile'}
+                      onClick={() =>
+                        setOpenObligationMetric((current) => (current === 'pending' ? null : 'pending'))
+                      }
+                      aria-expanded={openObligationMetric === 'pending'}
+                    >
+                      <span>Pendiente</span>
+                      <strong>{money.format(obligationSummary.totalPendingAmount)}</strong>
+                    </button>
+                    <button
+                      type="button"
+                      className={openObligationMetric === 'active' ? 'obligation-metric-tile is-open' : 'obligation-metric-tile'}
+                      onClick={() =>
+                        setOpenObligationMetric((current) => (current === 'active' ? null : 'active'))
+                      }
+                      aria-expanded={openObligationMetric === 'active'}
+                    >
+                      <span>Activas</span>
+                      <strong>{fixedStatus.activeItems.length}</strong>
+                    </button>
+                    <button
+                      type="button"
+                      className={openObligationMetric === 'paid' ? 'obligation-metric-tile is-open' : 'obligation-metric-tile'}
+                      onClick={() =>
+                        setOpenObligationMetric((current) => (current === 'paid' ? null : 'paid'))
+                      }
+                      aria-expanded={openObligationMetric === 'paid'}
+                    >
+                      <span>Pagadas</span>
+                      <strong>{fixedStatus.paid.length}</strong>
+                    </button>
+                    <button
+                      type="button"
+                      className={openObligationMetric === 'paused' ? 'obligation-metric-tile is-open' : 'obligation-metric-tile'}
+                      onClick={() =>
+                        setOpenObligationMetric((current) => (current === 'paused' ? null : 'paused'))
+                      }
+                      aria-expanded={openObligationMetric === 'paused'}
+                    >
+                      <span>Pausadas</span>
+                      <strong>{fixedStatus.paused.length}</strong>
+                    </button>
+                  </div>
+
+                  {openObligationMetric && (
+                    <div className="obligation-metric-detail" role="region" aria-label="Detalle de panorama">
+                      {openObligationMetric === 'pending' && (
+                        <>
+                          <p className="movement-detail">Pendientes por confirmar (máx. 6).</p>
+                          <div className="obligation-metric-list">
+                            {fixedStatus.pending
+                              .slice()
+                              .sort((a, b) => a.dueDay - b.dueDay)
+                              .slice(0, 6)
+                              .map((item) => (
+                                <div key={item.id} className="compact-pocket-row obligation-metric-row">
+                                  <div>
+                                    <strong>{item.title}</strong>
+                                    <p className="movement-detail">Día {item.dueDay} · {item.category}</p>
+                                  </div>
+                                  <span>{money.format(item.amount)}</span>
+                                </div>
+                              ))}
+                            {fixedStatus.pending.length === 0 && (
+                              <p className="empty-copy">No hay obligaciones pendientes.</p>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {openObligationMetric === 'active' && (
+                        <>
+                          <p className="movement-detail">Obligaciones activas (máx. 6).</p>
+                          <div className="obligation-metric-list">
+                            {fixedStatus.activeItems
+                              .slice()
+                              .sort((a, b) => a.dueDay - b.dueDay)
+                              .slice(0, 6)
+                              .map((item) => (
+                                <div key={item.id} className="compact-pocket-row obligation-metric-row">
+                                  <div>
+                                    <strong>{item.title}</strong>
+                                    <p className="movement-detail">Día {item.dueDay} · {getPocketName(state.pockets, item.pocketId)}</p>
+                                  </div>
+                                  <span>{money.format(item.amount)}</span>
+                                </div>
+                              ))}
+                            {fixedStatus.activeItems.length === 0 && (
+                              <p className="empty-copy">No hay obligaciones activas.</p>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {openObligationMetric === 'paid' && (
+                        <>
+                          <p className="movement-detail">Confirmadas este mes (máx. 6).</p>
+                          <div className="obligation-metric-list">
+                            {fixedStatus.paid
+                              .slice()
+                              .sort((a, b) => a.dueDay - b.dueDay)
+                              .slice(0, 6)
+                              .map((item) => (
+                                <div key={item.id} className="compact-pocket-row obligation-metric-row">
+                                  <div>
+                                    <strong>{item.title}</strong>
+                                    <p className="movement-detail">Día {item.dueDay} · {item.category}</p>
+                                  </div>
+                                  <span>{money.format(item.amount)}</span>
+                                </div>
+                              ))}
+                            {fixedStatus.paid.length === 0 && (
+                              <p className="empty-copy">Aún no hay pagos confirmados este mes.</p>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {openObligationMetric === 'paused' && (
+                        <>
+                          <p className="movement-detail">Pausadas (máx. 6).</p>
+                          <div className="obligation-metric-list">
+                            {fixedStatus.paused
+                              .slice()
+                              .sort((a, b) => a.dueDay - b.dueDay)
+                              .slice(0, 6)
+                              .map((item) => (
+                                <div key={item.id} className="compact-pocket-row obligation-metric-row">
+                                  <div>
+                                    <strong>{item.title}</strong>
+                                    <p className="movement-detail">Día {item.dueDay} · {item.category}</p>
+                                  </div>
+                                  <span>{money.format(item.amount)}</span>
+                                </div>
+                              ))}
+                            {fixedStatus.paused.length === 0 && (
+                              <p className="empty-copy">No hay obligaciones pausadas.</p>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </article>
+
+                <div className="obligation-insight-grid">
+                  <div className="obligation-insight-top">
+                    <article className="summary-box">
+                      <span>Dia con mayor carga</span>
+                      <strong>
+                        {obligationSummary.heaviestDueDay
+                          ? `Dia ${obligationSummary.heaviestDueDay.day}`
+                          : 'Sin carga'}
+                      </strong>
+                      <p className="movement-detail">
+                        {obligationSummary.heaviestDueDay
+                          ? money.format(obligationSummary.heaviestDueDay.total)
+                          : 'Aun no hay obligaciones activas'}
+                      </p>
+                    </article>
+                    <article className="summary-box">
+                      <span>Obligacion mas pesada</span>
+                      <strong>{obligationSummary.highestObligation?.title ?? 'Sin datos'}</strong>
+                      <p className="movement-detail">
+                        {obligationSummary.highestObligation
+                          ? money.format(obligationSummary.highestObligation.amount)
+                          : 'Sin obligaciones activas'}
+                      </p>
+                    </article>
+                  </div>
+                  <article className="summary-box">
+                    <span>En revision hoy</span>
+                    <strong>{fixedStatus.review.length}</strong>
+                    <p className="movement-detail">
+                      {fixedStatus.overdue.length} vencida(s) y{' '}
+                      {fixedStatus.pending.length - fixedStatus.overdue.length} pendiente(s)
+                    </p>
+                  </article>
+                </div>
+
+                <section className="obligation-agenda-grid">
+                  <article className="panel banking-panel obligation-agenda-panel">
+                    <div className="panel-header">
+                      <div>
+                        <span className="micro-label">Agenda</span>
+                        <h3>Proximos pagos</h3>
+                      </div>
+                    </div>
+                    <div className="obligation-agenda-list">
+                      {obligationSummary.nextDeadlines.map((item) => (
+                        <div key={item.id} className="compact-pocket-row obligation-agenda-row">
+                          <div>
+                            <strong>{item.title}</strong>
+                            <p className="movement-detail">
+                              Dia {item.dueDay} · {getPocketName(state.pockets, item.pocketId)}
+                            </p>
+                          </div>
+                          <span>{money.format(item.amount)}</span>
+                        </div>
+                      ))}
+                      {obligationSummary.nextDeadlines.length === 0 && (
+                        <p className="empty-copy">No hay pagos pendientes por agendar.</p>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="panel banking-panel obligation-agenda-panel">
+                    <div className="panel-header">
+                      <div>
+                        <span className="micro-label">Control</span>
+                        <h3>Proximas confirmaciones</h3>
+                      </div>
+                    </div>
+                    <div className="obligation-agenda-list">
+                      {obligationSummary.nextConfirmations.map((item) => (
+                        <div key={item.id} className="compact-pocket-row obligation-agenda-row">
+                          <div>
+                            <strong>{item.title}</strong>
+                            <p className="movement-detail">
+                              Confirmar dia {item.confirmationDay} · {item.category}
+                            </p>
+                          </div>
+                          <span>{money.format(item.amount)}</span>
+                        </div>
+                      ))}
+                      {obligationSummary.nextConfirmations.length === 0 && (
+                        <p className="empty-copy">No hay confirmaciones pendientes.</p>
+                      )}
+                    </div>
+                  </article>
+                </section>
+              </section>
+            </SectionFrame>
           </div>
 
           <aside className="secondary-column">
