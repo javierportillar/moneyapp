@@ -45,12 +45,33 @@
   --t-slow: 0.4s ease;
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --pwa-top-extra: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Use a fallback when iOS reports 0 for safe-area insets (seen in some PWA + translucent status bar cases). */
+  --top-inset: max(var(--safe-top), var(--pwa-top-extra));
   color: var(--text-primary);
   background: var(--bg-canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@supports (-webkit-touch-callout: none) {
+  :root {
+    /* Fallback headroom for iOS Safari/WebView when safe-area is unreliable. */
+    --pwa-top-extra: 24px;
+  }
+}
+
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  :root {
+    /* Extra fallback headroom for installed web apps (Dynamic Island / call indicator). */
+    --pwa-top-extra: 40px;
+  }
 }
 
 * {

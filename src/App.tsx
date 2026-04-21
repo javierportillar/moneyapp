@@ -3626,65 +3626,70 @@ function App() {
   }
 
   function renderMovementsView() {
-    return (
-      <>
-        {openComposer === 'movimientos' && (
-          <FullscreenComposer
-            isOpen={openComposer === 'movimientos'}
-            label="Registrar"
-            title={moduleLabels[activeModule]}
-            description={getModuleSummary(activeModule)}
-            enableSwipeClose
-            hideHeader
-            hideHeaderCopy
-            panelClassName="movement-composer-panel"
-            toolbarClassName="movement-composer-toolbar"
-            bodyClassName="movement-composer-body"
-            toolbarContentPosition="body"
-            onClose={() => {
-              resetExpenseForm()
-              resetIncomeForm()
-              resetTransferForm()
-              setOpenComposer(null)
-            }}
-            toolbarContent={
-              <section className="movement-composer-switcher-card">
-                <button
-                  type="button"
-                  className="icon-action-button close-icon-button movement-composer-close"
-                  aria-label="Cerrar ventana"
-                  title="Cerrar (Esc)"
-                  onClick={() => {
-                    resetExpenseForm()
-                    resetIncomeForm()
-                    resetTransferForm()
-                    setOpenComposer(null)
-                  }}
-                >
-                  ×
-                </button>
-                <div className="movement-composer-switcher-copy">
-                  <span className="movement-section-label">Tipo de registro</span>
-                  <p>Cambia entre gasto, ingreso o transferencia sin salir del flujo.</p>
-                </div>
-                <div className="module-segmented movement-composer-segmented">
-                  {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
-                    <button
-                      key={module}
-                      type="button"
-                      className={module === activeModule ? 'segment active' : 'segment'}
-                      onClick={() => setActiveModule(module)}
-                    >
-                      {moduleLabels[module]}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            }
-          >
-            {renderActiveForm()}
-          </FullscreenComposer>
-        )}
+	    return (
+	      <>
+	        {openComposer === 'movimientos' && (
+	          <FullscreenComposer
+	            isOpen={openComposer === 'movimientos'}
+	            label="Registrar"
+	            title={moduleLabels[activeModule]}
+	            description={getModuleSummary(activeModule)}
+	            enableSwipeClose
+	            hideHeader
+	            hideHeaderCopy
+	            floatingClose={false}
+	            panelClassName="movement-composer-panel"
+	            toolbarClassName="movement-composer-toolbar"
+	            bodyClassName="movement-composer-body"
+	            onClose={() => {
+	              resetExpenseForm()
+	              resetIncomeForm()
+	              resetTransferForm()
+	              setOpenComposer(null)
+	            }}
+	          >
+	            <section className="movement-composer-switcher-card">
+	              <button
+	                type="button"
+	                className="icon-action-button close-icon-button movement-composer-close"
+	                aria-label="Cerrar ventana"
+	                title="Cerrar"
+	                onClick={() => {
+	                  resetExpenseForm()
+	                  resetIncomeForm()
+	                  resetTransferForm()
+	                  setOpenComposer(null)
+	                }}
+	                onTouchEnd={(event) => {
+	                  event.preventDefault()
+	                  resetExpenseForm()
+	                  resetIncomeForm()
+	                  resetTransferForm()
+	                  setOpenComposer(null)
+	                }}
+	              >
+	                ×
+	              </button>
+	              <div className="movement-composer-switcher-copy">
+	                <span className="movement-section-label">Tipo de registro</span>
+	                <p>Cambia entre gasto, ingreso o transferencia sin salir del flujo.</p>
+	              </div>
+	              <div className="module-segmented movement-composer-segmented">
+	                {(['gasto', 'ingreso', 'transferencia'] as ModuleKey[]).map((module) => (
+	                  <button
+	                    key={module}
+	                    type="button"
+	                    className={module === activeModule ? 'segment active' : 'segment'}
+	                    onClick={() => setActiveModule(module)}
+	                  >
+	                    {moduleLabels[module]}
+	                  </button>
+	                ))}
+	              </div>
+	            </section>
+	            {renderActiveForm()}
+	          </FullscreenComposer>
+	        )}
 
         <section className="panel banking-panel movement-command-center">
           <div className="movement-command-header">
@@ -4253,44 +4258,60 @@ function App() {
                   return (
                     <article
                       key={item.id}
-                      className={isLate ? 'fixed-card obligation-row late-row' : 'fixed-card obligation-row'}
+                      className={isLate ? 'obligation-row late-row' : 'obligation-row'}
                     >
-                      <div className="obligation-main">
-                        <div className="card-title-row">
+                      <div className="obligation-header">
+                        <div className="obligation-title">
                           <strong>{item.title}</strong>
-                          <button
-                            type="button"
-                            className="edit-icon-button"
-                            aria-label={`Editar obligacion ${item.title}`}
-                            onClick={() => startEditFixedExpense(item.id)}
-                          >
-                            <LuPencil />
-                          </button>
+                          <p className="obligation-subtitle">
+                            {getPocketName(state.pockets, item.pocketId)} · {item.category}
+                          </p>
                         </div>
-                        <div className="obligation-chip-row">
-                          <span className="obligation-chip">Pago dia {item.dueDay}</span>
-                          <span className="obligation-chip">Confirmar dia {item.confirmationDay}</span>
-                          <span className="obligation-chip">{getPocketName(state.pockets, item.pocketId)}</span>
-                          <span className="obligation-chip">{item.category}</span>
-                        </div>
-                      </div>
-                      <div className="fixed-card-side">
-                        <span>{money.format(item.amount)}</span>
-                        <small className={!item.active ? 'paused' : isPaid ? 'paid' : isLate ? 'late' : 'pending'}>
-                          {!item.active ? 'Pausada' : isPaid ? 'Pagado' : isLate ? 'Vencido' : 'Pendiente'}
-                        </small>
-                        {item.active && !isPaid && (
-                          <button
-                            type="button"
-                            className={isDueOrPast ? 'warning-button' : undefined}
-                            onClick={() => openFixedPaymentConfirmation(item.id)}
-                          >
-                            {isDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
-                          </button>
-                        )}
-                        <button type="button" className="secondary-button slim" onClick={() => handleToggleFixedExpense(item.id)}>
-                          {item.active ? 'Pausar' : 'Reactivar'}
+                        <button
+                          type="button"
+                          className="edit-icon-button obligation-edit"
+                          aria-label={`Editar obligacion ${item.title}`}
+                          onClick={() => startEditFixedExpense(item.id)}
+                        >
+                          <LuPencil />
                         </button>
+                      </div>
+
+                      <div className="obligation-meta">
+                        <span className="obligation-chip">Pago dia {item.dueDay}</span>
+                        <span className="obligation-chip">Confirmar dia {item.confirmationDay}</span>
+                      </div>
+
+                      <div className="obligation-footer">
+                        <div className="obligation-amount">
+                          <span className="obligation-amount-value">{money.format(item.amount)}</span>
+                          <small className={!item.active ? 'paused' : isPaid ? 'paid' : isLate ? 'late' : 'pending'}>
+                            {!item.active ? 'Pausada' : isPaid ? 'Pagado' : isLate ? 'Vencido' : 'Pendiente'}
+                          </small>
+                        </div>
+
+                        <div className="obligation-actions">
+                          {item.active && !isPaid && (
+                            <button
+                              type="button"
+                              className={
+                                isDueOrPast
+                                  ? 'action-trigger obligation-primary warning-button'
+                                  : 'action-trigger obligation-primary'
+                              }
+                              onClick={() => openFixedPaymentConfirmation(item.id)}
+                            >
+                              {isDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="secondary-button slim obligation-secondary"
+                            onClick={() => handleToggleFixedExpense(item.id)}
+                          >
+                            {item.active ? 'Pausar' : 'Reactivar'}
+                          </button>
+                        </div>
                       </div>
                     </article>
                   )
@@ -4554,6 +4575,10 @@ function App() {
                           Valor a registrar
                           <input
                             type="number"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            min={0}
+                            step={1}
                             value={debtPaymentDrafts[debt.id] ?? String(debt.installmentAmount)}
                             onChange={(event) =>
                               setDebtPaymentDrafts((current) => ({

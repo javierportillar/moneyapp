@@ -10,6 +10,7 @@ type FullscreenComposerProps = {
   enableSwipeClose?: boolean
   hideHeader?: boolean
   hideHeaderCopy?: boolean
+  floatingClose?: boolean
   toolbarContent?: ReactNode
   toolbarContentPosition?: 'header' | 'body'
   panelClassName?: string
@@ -34,21 +35,19 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     if (!props.isOpen) return
 
     const previousBodyOverflow = document.body.style.overflow
-    const previousBodyTouchAction = document.body.style.touchAction
     const previousBodyPosition = document.body.style.position
     const previousBodyTop = document.body.style.top
     const previousBodyWidth = document.body.style.width
-    const previousHtmlOverflow = document.documentElement.style.overflow
-    const previousHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior
+    const previousBodyLeft = document.body.style.left
+    const previousBodyRight = document.body.style.right
 
     scrollLockRef.current = window.scrollY
     document.body.style.overflow = 'hidden'
-    document.body.style.touchAction = 'none'
     document.body.style.position = 'fixed'
     document.body.style.top = `-${scrollLockRef.current}px`
     document.body.style.width = '100%'
-    document.documentElement.style.overflow = 'hidden'
-    document.documentElement.style.overscrollBehavior = 'none'
+    document.body.style.left = '0'
+    document.body.style.right = '0'
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -60,12 +59,11 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = previousBodyOverflow
-      document.body.style.touchAction = previousBodyTouchAction
       document.body.style.position = previousBodyPosition
       document.body.style.top = previousBodyTop
       document.body.style.width = previousBodyWidth
-      document.documentElement.style.overflow = previousHtmlOverflow
-      document.documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior
+      document.body.style.left = previousBodyLeft
+      document.body.style.right = previousBodyRight
       window.scrollTo(0, scrollLockRef.current)
       window.removeEventListener('keydown', handleKeyDown)
     }
@@ -91,6 +89,7 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
     'banking-panel',
     'action-panel',
     props.enableSwipeClose ? 'swipe-close-enabled' : null,
+    props.hideHeader ? 'no-header' : null,
     props.panelClassName,
   ]
     .filter(Boolean)
@@ -169,7 +168,14 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
 
   const content = (
     <div className="fullscreen-composer-shell">
-      <div className="fullscreen-composer-backdrop" onClick={props.onClose} />
+      <div
+        className="fullscreen-composer-backdrop"
+        onClick={props.onClose}
+        onTouchEnd={(event) => {
+          event.preventDefault()
+          props.onClose()
+        }}
+      />
       {props.enableSwipeClose && (
         <div
           className="fullscreen-composer-swipe-hotspot"
@@ -179,6 +185,21 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
           onTouchCancel={handleTouchEnd}
           aria-hidden="true"
         />
+      )}
+      {props.hideHeader && props.floatingClose !== false && (
+        <button
+          type="button"
+          className="icon-action-button close-icon-button fullscreen-composer-floating-close"
+          aria-label="Cerrar ventana"
+          title="Cerrar"
+          onClick={props.onClose}
+          onTouchEnd={(event) => {
+            event.preventDefault()
+            props.onClose()
+          }}
+        >
+          ×
+        </button>
       )}
       <section ref={panelRef} className={panelClassName}>
         {!props.hideHeader && (
@@ -196,6 +217,10 @@ export function FullscreenComposer(props: FullscreenComposerProps) {
               aria-label="Cerrar ventana"
               title="Cerrar (Esc)"
               onClick={props.onClose}
+              onTouchEnd={(event) => {
+                event.preventDefault()
+                props.onClose()
+              }}
             >
               ×
             </button>
