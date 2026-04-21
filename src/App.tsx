@@ -4069,12 +4069,58 @@ function App() {
 	                  <div className="simple-movement-meta">
 	                    <div className="simple-movement-meta-text">
 	                      <p>{formatMovementDateTimeDisplay(item.date, item.time)}</p>
-	                      <p className="simple-movement-method">{item.meta}</p>
+	                      {item.kind === 'transferencia' ? (
+	                        (() => {
+	                          const transfer = state.transfers.find((entry) => entry.id === item.id)
+	                          if (!transfer) return <p className="simple-movement-method">{item.meta}</p>
+
+	                          const fromPocketName = getPocketName(state.pockets, transfer.fromPocketId)
+	                          const toPocketName = getPocketName(state.pockets, transfer.toPocketId)
+
+	                          return (
+	                            <div className="simple-transfer-method">
+	                              <p className="simple-movement-method">Salida: {fromPocketName}</p>
+	                              <p className="simple-movement-method">Entrada: {toPocketName}</p>
+	                            </div>
+	                          )
+	                        })()
+	                      ) : (
+	                        <p className="simple-movement-method">{item.meta}</p>
+	                      )}
 	                    </div>
-	                    <strong className={item.kind === 'ingreso' ? 'simple-income' : 'simple-outflow'}>
-	                      {item.kind === 'ingreso' ? '+' : '-'}
-	                      {money.format(Math.abs(item.amount))}
-	                    </strong>
+	                    {item.kind === 'transferencia' && movementFilters.pocketId === 'todos' ? (
+	                      (() => {
+	                        const transfer = state.transfers.find((entry) => entry.id === item.id)
+	                        if (!transfer) {
+	                          return (
+	                            <strong className="simple-outflow">
+	                              -{money.format(Math.abs(item.amount))}
+	                            </strong>
+	                          )
+	                        }
+
+	                        const fromPocketName = getPocketName(state.pockets, transfer.fromPocketId)
+	                        const toPocketName = getPocketName(state.pockets, transfer.toPocketId)
+
+	                        return (
+	                          <div className="simple-transfer-amount" aria-label="Salida y entrada de transferencia">
+	                            <div className="simple-transfer-line simple-outflow">
+	                              <span>-{money.format(transfer.amount)}</span>
+	                              <small>{fromPocketName}</small>
+	                            </div>
+	                            <div className="simple-transfer-line simple-income">
+	                              <span>+{money.format(transfer.amount)}</span>
+	                              <small>{toPocketName}</small>
+	                            </div>
+	                          </div>
+	                        )
+	                      })()
+	                    ) : (
+	                      <strong className={item.amount >= 0 ? 'simple-income' : 'simple-outflow'}>
+	                        {item.amount >= 0 ? '+' : '-'}
+	                        {money.format(Math.abs(item.amount))}
+	                      </strong>
+	                    )}
 	                  </div>
                 </article>
               ))}
