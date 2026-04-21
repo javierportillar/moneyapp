@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   LuArrowLeftRight,
   LuCalendar,
@@ -446,6 +447,10 @@ function App() {
   const [openObligationMetric, setOpenObligationMetric] = useState<
     null | 'pending' | 'active' | 'paid' | 'paused'
   >(null)
+  const [uiNotice, setUiNotice] = useState<null | { id: number; title: string; message: string }>(
+    null,
+  )
+  const noticeTimerRef = useRef<number | null>(null)
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
   const [openPocketDetailId, setOpenPocketDetailId] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
@@ -462,6 +467,47 @@ function App() {
   const [bootSettled, setBootSettled] = useState(false)
   const isAdminUser = auth.user?.typeuser === 'admin'
   const loadingPending = (auth.isConfigured && auth.isLoading) || !isReady
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [activeView, activeModule])
+
+  function computePocketBalances(snapshot: AppState) {
+    const balances = Object.fromEntries(snapshot.pockets.map((pocket) => [pocket.id, 0])) as Record<
+      string,
+      number
+    >
+
+    snapshot.incomes.forEach((income) => {
+      balances[income.pocketId] = (balances[income.pocketId] ?? 0) + income.amount
+    })
+
+    snapshot.expenses.forEach((expense) => {
+      balances[expense.pocketId] = (balances[expense.pocketId] ?? 0) - expense.amount
+    })
+
+    snapshot.transfers.forEach((transfer) => {
+      balances[transfer.fromPocketId] = (balances[transfer.fromPocketId] ?? 0) - transfer.amount
+      balances[transfer.toPocketId] = (balances[transfer.toPocketId] ?? 0) + transfer.amount
+    })
+
+    return balances
+  }
+
+  function showUiNotice(title: string, message: string) {
+    setUiNotice({ id: Date.now(), title, message })
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = window.setTimeout(() => {
+      setUiNotice(null)
+      noticeTimerRef.current = null
+    }, 3000)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     let progressTimer: number | undefined
@@ -1533,25 +1579,29 @@ function App() {
 
     const pocketId = expenseForm.pocketId
     const pocketName = getPocketName(state.pockets, pocketId)
-    const currentExpense = expenseForm.id
-      ? state.expenses.find((item) => item.id === expenseForm.id)
-      : undefined
-    const availableBalance =
-      (pocketBalances[pocketId] ?? 0) +
-      (currentExpense && currentExpense.pocketId === pocketId ? currentExpense.amount : 0)
-
-    if (numericAmount > availableBalance) {
-      window.alert(
-        `Saldo insuficiente. El bolsillo "${pocketName}" tiene ${money.format(
-          availableBalance,
-        )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`,
-      )
-      return
-    }
 
     const executeAddExpense = () => {
+      let didSave = false
+      const noticeToShow = { current: null as null | { title: string; message: string } }
+
       setState((current) => {
-        const currentExpense = current.expenses.find((item) => item.id === expenseForm.id)
+        const balances = computePocketBalances(current)
+        const currentExpense = expenseForm.id
+          ? current.expenses.find((item) => item.id === expenseForm.id)
+          : undefined
+        const availableBalance =
+          (balances[pocketId] ?? 0) +
+          (currentExpense && currentExpense.pocketId === pocketId ? currentExpense.amount : 0)
+
+        if (numericAmount > availableBalance) {
+          const title = 'Saldo insuficiente'
+          const message = `El bolsillo "${pocketName}" tiene ${money.format(
+            availableBalance,
+          )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`
+          noticeToShow.current = { title, message }
+          return current
+        }
+
         const selectedCategory = expenseForm.category
         const selectedConfidence = getCategoryConfidenceForSelection(
           selectedCategory,
@@ -1592,6 +1642,7 @@ function App() {
           }
         })
 
+        didSave = true
         return {
           ...current,
           learningRules,
@@ -1600,6 +1651,13 @@ function App() {
             : [expense, ...current.expenses],
         }
       })
+
+      if (noticeToShow.current) {
+        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
+        return
+      }
+
+      if (!didSave) return
 
       resetExpenseForm()
       setOpenComposer(null)
@@ -1675,27 +1733,31 @@ function App() {
 	    const transferDate = transferForm.date || today
 	    const fallbackTime = getCurrentTimeHHmm()
 	    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
-
     const fromPocketId = transferForm.fromPocketId
     const fromPocketName = getPocketName(state.pockets, fromPocketId)
-    const existingTransfer = transferForm.id
-      ? state.transfers.find((item) => item.id === transferForm.id)
-      : undefined
-    const availableBalance =
-      (pocketBalances[fromPocketId] ?? 0) +
-      (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
-
-    if (numericAmount > availableBalance) {
-      window.alert(
-        `Saldo insuficiente. El bolsillo "${fromPocketName}" tiene ${money.format(
-          availableBalance,
-        )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`,
-      )
-      return
-    }
 
 	    const executeAddTransfer = () => {
+        let didSave = false
+        const noticeToShow = { current: null as null | { title: string; message: string } }
+
 	      setState((current) => {
+          const balances = computePocketBalances(current)
+          const existingTransfer = transferForm.id
+            ? current.transfers.find((item) => item.id === transferForm.id)
+            : undefined
+          const availableBalance =
+            (balances[fromPocketId] ?? 0) +
+            (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
+
+          if (numericAmount > availableBalance) {
+            const title = 'Saldo insuficiente'
+            const message = `El bolsillo "${fromPocketName}" tiene ${money.format(
+              availableBalance,
+            )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`
+            noticeToShow.current = { title, message }
+            return current
+          }
+
 	        const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
 	        const transfer: Transfer = {
 	          id: transferForm.id || crypto.randomUUID(),
@@ -1707,6 +1769,7 @@ function App() {
 	          note: transferForm.note.trim(),
 	        }
 
+        didSave = true
         return {
           ...current,
           transfers: transferForm.id
@@ -1714,6 +1777,13 @@ function App() {
             : [transfer, ...current.transfers],
         }
       })
+
+      if (noticeToShow.current) {
+        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
+        return
+      }
+
+      if (!didSave) return
 
       resetTransferForm()
       setOpenComposer(null)
@@ -1832,29 +1902,34 @@ function App() {
     setOpenComposer(null)
   }
 
-  function handlePayFixedExpense(fixedId: string, paymentPocketId?: string, paymentDate?: string) {
-    const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
-    const targetPocketId = paymentPocketId || fixed?.pocketId
-    if (fixed && targetPocketId) {
-      const availableBalance = pocketBalances[targetPocketId] ?? 0
-      if (fixed.amount > availableBalance) {
-        window.alert(
-          `Saldo insuficiente. El bolsillo "${getPocketName(state.pockets, targetPocketId)}" tiene ${money.format(
-            availableBalance,
-          )} disponibles y estás intentando pagar ${money.format(fixed.amount)}.`,
-        )
-        return
-      }
-    }
+	  function handlePayFixedExpense(
+	    fixedId: string,
+	    paymentPocketId?: string,
+	    paymentDate?: string,
+	  ) {
+	    let didPay = false
+      const noticeToShow = { current: null as null | { title: string; message: string } }
 
-    setState((current) => {
-      const fixed = current.fixedExpenses.find((item) => item.id === fixedId)
-      const effectiveDate = paymentDate || today
-      const effectiveMonthKey = effectiveDate.slice(0, 7)
+	    setState((current) => {
+	      const fixed = current.fixedExpenses.find((item) => item.id === fixedId)
+	      const effectiveDate = paymentDate || today
+	      const effectiveMonthKey = effectiveDate.slice(0, 7)
 
       if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return current
 
       const resolvedPocketId = paymentPocketId || fixed.pocketId
+      const balances = computePocketBalances(current)
+	      const availableBalance = balances[resolvedPocketId] ?? 0
+
+	      if (fixed.amount > availableBalance) {
+	        const title = 'Saldo insuficiente'
+	        const message = `El bolsillo "${getPocketName(state.pockets, resolvedPocketId)}" tiene ${money.format(
+	          availableBalance,
+	        )} disponibles y estás intentando pagar ${money.format(fixed.amount)}.`
+          noticeToShow.current = { title, message }
+	        return current
+	      }
+
       const resolvedBalance = (() => {
         let balance = 0
         current.incomes.forEach((income) => {
@@ -1884,23 +1959,37 @@ function App() {
 	        confidence: 1,
 	      }
 
-      return {
-        ...current,
-        expenses: [expense, ...current.expenses],
-        fixedExpenses: current.fixedExpenses.map((item) =>
-          item.id === fixedId ? { ...item, lastPaidMonth: effectiveMonthKey } : item,
-        ),
+	      didPay = true
+		      return {
+		        ...current,
+		        expenses: [expense, ...current.expenses],
+		        fixedExpenses: current.fixedExpenses.map((item) =>
+		          item.id === fixedId ? { ...item, lastPaidMonth: effectiveMonthKey } : item,
+		        ),
+		      }
+		    })
+
+      if (noticeToShow.current) {
+        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
+        return false
       }
-    })
-  }
 
-  function handleConfirmFixedPayment(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!fixedPaymentDraft?.fixedId || !fixedPaymentDraft.pocketId || !fixedPaymentDraft.paymentDate) return
+	      return didPay
+	  }
 
-    handlePayFixedExpense(fixedPaymentDraft.fixedId, fixedPaymentDraft.pocketId, fixedPaymentDraft.paymentDate)
-    closeFixedPaymentConfirmation()
-  }
+	  function handleConfirmFixedPayment(event: React.FormEvent<HTMLFormElement>) {
+	    event.preventDefault()
+	    if (!fixedPaymentDraft?.fixedId || !fixedPaymentDraft.pocketId || !fixedPaymentDraft.paymentDate) return
+
+	    const didPay = handlePayFixedExpense(
+	      fixedPaymentDraft.fixedId,
+	      fixedPaymentDraft.pocketId,
+	      fixedPaymentDraft.paymentDate,
+	    )
+	    if (didPay) {
+	      closeFixedPaymentConfirmation()
+	    }
+	  }
 
   function handleToggleFixedExpense(fixedId: string) {
     setState((current) => ({
@@ -1955,23 +2044,9 @@ function App() {
     setOpenComposer(null)
   }
 
-  function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
-    const snapshotDebt = state.debts.find((item) => item.id === debtId)
-    if (!snapshotDebt || !snapshotDebt.active || snapshotDebt.remainingAmount <= 0) return
-
-    const draftAmount = Number(debtPaymentDrafts[debtId] || snapshotDebt.installmentAmount)
-    const paymentAmount = Math.min(Math.max(draftAmount, 0), snapshotDebt.remainingAmount)
-    if (paymentAmount <= 0) return
-
-    const availableBalance = pocketBalances[snapshotDebt.pocketId] ?? 0
-    if (paymentAmount > availableBalance) {
-      window.alert(
-        `Saldo insuficiente. El bolsillo "${getPocketName(state.pockets, snapshotDebt.pocketId)}" tiene ${money.format(
-          availableBalance,
-        )} disponibles y estás intentando registrar ${money.format(paymentAmount)}.`,
-      )
-      return
-    }
+	  function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
+    let didPay = false
+    const noticeToShow = { current: null as null | { title: string; message: string } }
 
     setState((current) => {
       const debt = current.debts.find((item) => item.id === debtId)
@@ -1980,6 +2055,17 @@ function App() {
       const draftAmount = Number(debtPaymentDrafts[debtId] || debt.installmentAmount)
       const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
       if (paymentAmount <= 0) return current
+
+      const balances = computePocketBalances(current)
+      const availableBalance = balances[debt.pocketId] ?? 0
+      if (paymentAmount > availableBalance) {
+        const title = 'Saldo insuficiente'
+        const message = `El bolsillo "${getPocketName(state.pockets, debt.pocketId)}" tiene ${money.format(
+          availableBalance,
+        )} disponibles y estás intentando registrar ${money.format(paymentAmount)}.`
+        noticeToShow.current = { title, message }
+        return current
+      }
 
       const resolvedPocketId = debt.pocketId
       const resolvedBalance = (() => {
@@ -2011,6 +2097,7 @@ function App() {
 	        confidence: 1,
 	      }
 
+      didPay = true
       return {
         ...current,
         expenses: [expense, ...current.expenses],
@@ -2037,9 +2124,16 @@ function App() {
       }
     })
 
+    if (noticeToShow.current) {
+      showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
+      return
+    }
+
+    if (!didPay) return
+
     setDebtPaymentDrafts((current) => ({ ...current, [debtId]: '' }))
     setOpenDebtPaymentId(null)
-  }
+	  }
 
   function handleAddCategory(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -5676,6 +5770,26 @@ function App() {
 
   return (
     <main className="banking-app">
+      {uiNotice &&
+        createPortal(
+          <div className="ui-notice-shell" role="alert" aria-live="assertive">
+            <div className="ui-notice-card">
+              <div className="ui-notice-copy">
+                <strong>{uiNotice.title}</strong>
+                <p>{uiNotice.message}</p>
+              </div>
+              <button
+                type="button"
+                className="ui-notice-close"
+                aria-label="Cerrar alerta"
+                onClick={() => setUiNotice(null)}
+              >
+                <LuX />
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
       <aside className="sidebar">
         <div className="sidebar-brand-row">
           <div className="brand unified-brand-header">
