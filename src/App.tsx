@@ -451,6 +451,8 @@ function App() {
     null,
   )
   const noticeTimerRef = useRef<number | null>(null)
+  const actionLoadingRef = useRef<Record<string, boolean>>({})
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({})
   const [selectedPocketId, setSelectedPocketId] = useState(initialState.pockets[0].id)
   const [openPocketDetailId, setOpenPocketDetailId] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
@@ -501,6 +503,25 @@ function App() {
       setUiNotice(null)
       noticeTimerRef.current = null
     }, 3000)
+  }
+
+  function beginAction(key: string) {
+    if (actionLoadingRef.current[key]) return false
+    actionLoadingRef.current[key] = true
+    setActionLoading((current) => ({ ...current, [key]: true }))
+    return true
+  }
+
+  function endAction(key: string, delayMs = 350) {
+    window.setTimeout(() => {
+      delete actionLoadingRef.current[key]
+      setActionLoading((current) => {
+        if (!current[key]) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+    }, delayMs)
   }
 
   useEffect(() => {
@@ -624,6 +645,7 @@ function App() {
     groupBy: 'dia',
   })
   const [movementMonthKey, setMovementMonthKey] = useState(currentMonthKey)
+  const [summaryMonthKey, setSummaryMonthKey] = useState(currentMonthKey)
   const [debtForm, setDebtForm] = useState({
     id: '',
     title: '',
@@ -740,19 +762,19 @@ function App() {
       }
     })
   }, [suggestion.category])
-  const previousMonthKey = getMonthKeyFromOffset(currentMonthKey, -1)
+  const previousMonthKey = getMonthKeyFromOffset(summaryMonthKey, -1)
 
   const monthExpenses = useMemo(
-    () => state.expenses.filter((expense) => expense.date.startsWith(currentMonthKey)),
-    [currentMonthKey, state.expenses],
+    () => state.expenses.filter((expense) => expense.date.startsWith(summaryMonthKey)),
+    [summaryMonthKey, state.expenses],
   )
   const monthIncomes = useMemo(
-    () => state.incomes.filter((income) => income.date.startsWith(currentMonthKey)),
-    [currentMonthKey, state.incomes],
+    () => state.incomes.filter((income) => income.date.startsWith(summaryMonthKey)),
+    [summaryMonthKey, state.incomes],
   )
   const monthTransfers = useMemo(
-    () => state.transfers.filter((transfer) => transfer.date.startsWith(currentMonthKey)),
-    [currentMonthKey, state.transfers],
+    () => state.transfers.filter((transfer) => transfer.date.startsWith(summaryMonthKey)),
+    [summaryMonthKey, state.transfers],
   )
   const movementMonthExpenses = useMemo(
     () => state.expenses.filter((expense) => expense.date.startsWith(movementMonthKey)),
@@ -867,10 +889,10 @@ function App() {
     const pendingDebt = activeDebts.reduce((sum, debt) => sum + debt.remainingAmount, 0)
     const carriedBalance =
       state.incomes
-        .filter((income) => income.date.slice(0, 7) < currentMonthKey)
+        .filter((income) => income.date.slice(0, 7) < summaryMonthKey)
         .reduce((sum, income) => sum + income.amount, 0) -
       state.expenses
-        .filter((expense) => expense.date.slice(0, 7) < currentMonthKey)
+        .filter((expense) => expense.date.slice(0, 7) < summaryMonthKey)
         .reduce((sum, expense) => sum + expense.amount, 0)
 
     return {
@@ -888,7 +910,6 @@ function App() {
     }
   }, [
     activeDebts,
-    currentMonthKey,
     fixedStatus.pending,
     monthExpenses,
     monthIncomes,
@@ -897,6 +918,7 @@ function App() {
     previousMonthIncomes,
     state.expenses,
     state.incomes,
+    summaryMonthKey,
   ])
 
   const topCategories = useMemo(() => {
@@ -1041,6 +1063,12 @@ function App() {
 
   const selectedPocket = state.pockets.find((pocket) => pocket.id === selectedPocketId) ?? state.pockets[0]
 
+  const pocketsById = useMemo(() => new Map(state.pockets.map((pocket) => [pocket.id, pocket])), [state.pockets])
+  const transfersById = useMemo(
+    () => new Map(state.transfers.map((transfer) => [transfer.id, transfer])),
+    [state.transfers],
+  )
+
 	  const filteredActivity = useMemo(() => {
 	    const normalizedQuery = normalize(movementFilters.query)
 
@@ -1097,37 +1125,138 @@ function App() {
 	    state.transfers,
 	  ])
 
-  const movementSummary = useMemo(() => {
-    const inflow = filteredActivity
-      .filter((item) => item.amount > 0)
-      .reduce((sum, item) => sum + item.amount, 0)
-    const outflow = filteredActivity
-      .filter((item) => item.amount < 0)
-      .reduce((sum, item) => sum + Math.abs(item.amount), 0)
-    const transfers = filteredActivity.filter((item) => item.kind === 'transferencia').length
+  const movementSummaryActivity = useMemo(() => {
+    if (movementFilters.pocketId === 'todos') return movementActivity
+    return movementActivity.filter((item) => item.pocketIds.includes(movementFilters.pocketId))
+  }, [movementActivity, movementFilters.pocketId])
+
+  function summarizeMovementTotals(
+    items: typeof movementActivity,
+    pocketId: string,
+    pocketType: 'todos' | PocketType,
+  ) {
+    const matchesPocketType = (id: string) =>
+      pocketType === 'todos' ? true : pocketsById.get(id)?.type === pocketType
+
+    let inflow = 0
+    let outflow = 0
+
+    items.forEach((item) => {
+      if (item.kind === 'transferencia') {
+        const transfer = transfersById.get(item.id)
+        if (!transfer) return
+
+        const includeFrom =
+          (pocketId === 'todos' || transfer.fromPocketId === pocketId) && matchesPocketType(transfer.fromPocketId)
+        const includeTo =
+          (pocketId === 'todos' || transfer.toPocketId === pocketId) && matchesPocketType(transfer.toPocketId)
+
+        if (includeFrom) outflow += transfer.amount
+        if (includeTo) inflow += transfer.amount
+        return
+      }
+
+      const itemPocketId = item.pocketIds[0]
+      if (itemPocketId && !matchesPocketType(itemPocketId)) return
+
+      if (item.amount > 0) inflow += item.amount
+      if (item.amount < 0) outflow += Math.abs(item.amount)
+    })
 
     return {
       inflow,
       outflow,
-      transfers,
-      count: filteredActivity.length,
+      count: items.length,
     }
-  }, [filteredActivity])
+  }
 
-  const movementExpenseRatio =
-    movementSummary.inflow > 0
-      ? movementSummary.outflow / movementSummary.inflow
-      : movementSummary.outflow > 0
-        ? 1
-        : 0
-  const movementVolume = movementSummary.inflow + movementSummary.outflow
+  const movementSummary = useMemo(() => {
+    return summarizeMovementTotals(movementSummaryActivity, movementFilters.pocketId, 'todos')
+  }, [movementFilters.pocketId, movementSummaryActivity])
+
+	  const movementListSummary = useMemo(() => {
+	    return summarizeMovementTotals(filteredActivity, movementFilters.pocketId, movementFilters.pocketType)
+	  }, [filteredActivity, movementFilters.kind, movementFilters.pocketId, movementFilters.pocketType, movementFilters.query])
+
+	  function getMovementScopePocketIds(pocketId: string, pocketType: 'todos' | PocketType) {
+	    return state.pockets
+	      .filter((pocket) => pocketId === 'todos' || pocket.id === pocketId)
+	      .filter((pocket) => pocketType === 'todos' || pocket.type === pocketType)
+	      .map((pocket) => pocket.id)
+	  }
+
+	  function calculateScopedBalanceBeforeMonth(
+	    monthKey: string,
+	    pocketId: string,
+	    pocketType: 'todos' | PocketType,
+	  ) {
+	    const scopePocketIds = new Set(getMovementScopePocketIds(pocketId, pocketType))
+	    let balance = 0
+
+	    state.incomes.forEach((income) => {
+	      if (income.date.slice(0, 7) < monthKey && scopePocketIds.has(income.pocketId)) {
+	        balance += income.amount
+	      }
+	    })
+
+	    state.expenses.forEach((expense) => {
+	      if (expense.date.slice(0, 7) < monthKey && scopePocketIds.has(expense.pocketId)) {
+	        balance -= expense.amount
+	      }
+	    })
+
+	    state.transfers.forEach((transfer) => {
+	      if (transfer.date.slice(0, 7) >= monthKey) return
+	      if (scopePocketIds.has(transfer.fromPocketId)) balance -= transfer.amount
+	      if (scopePocketIds.has(transfer.toPocketId)) balance += transfer.amount
+	    })
+
+	    return balance
+	  }
+
+	  const movementOpeningBalance = useMemo(
+	    () => calculateScopedBalanceBeforeMonth(movementMonthKey, movementFilters.pocketId, 'todos'),
+	    [movementFilters.pocketId, movementMonthKey, state.expenses, state.incomes, state.pockets, state.transfers],
+	  )
+
+	  const movementEffectiveInflow = movementSummary.inflow + Math.max(0, movementOpeningBalance)
+	  const movementEffectiveOutflow = movementSummary.outflow + Math.max(0, -movementOpeningBalance)
+	  const movementClosingBalance = movementEffectiveInflow - movementEffectiveOutflow
+
+	  const shouldShowMovementOpeningRow = useMemo(() => {
+	    if (movementOpeningBalance === 0) return false
+	    if (movementFilters.date) return false
+	    if (movementFilters.kind !== 'todos' && movementFilters.kind !== 'ingreso') return false
+	    if (movementFilters.pocketType !== 'todos') return false
+	    const normalizedQuery = normalize(movementFilters.query)
+	    if (!normalizedQuery) return true
+	    return (
+	      normalize('saldo anterior cierre mensual balance heredado').includes(normalizedQuery) ||
+	      normalize(formatMonthName(movementMonthKey)).includes(normalizedQuery)
+	    )
+	  }, [
+	    movementFilters.date,
+	    movementFilters.kind,
+	    movementFilters.pocketType,
+	    movementFilters.query,
+	    movementMonthKey,
+	    movementOpeningBalance,
+	  ])
+
+	  const movementExpenseRatio =
+	    movementEffectiveInflow > 0
+	      ? movementEffectiveOutflow / movementEffectiveInflow
+	      : movementEffectiveOutflow > 0
+	        ? 1
+	        : 0
+  const movementVolume = movementListSummary.inflow + movementListSummary.outflow
   const movementAverageTicket =
-    movementSummary.count > 0 ? movementVolume / movementSummary.count : 0
+    movementListSummary.count > 0 ? movementVolume / movementListSummary.count : 0
 
   const summaryDrilldown = useMemo(() => {
     const previousMovements = [
       ...state.incomes
-        .filter((item) => item.date.slice(0, 7) < currentMonthKey)
+        .filter((item) => item.date.slice(0, 7) < summaryMonthKey)
         .map((income) => ({
           id: `income-${income.id}`,
           title: income.title,
@@ -1136,7 +1265,7 @@ function App() {
           meta: getPocketName(state.pockets, income.pocketId),
         })),
       ...state.expenses
-        .filter((item) => item.date.slice(0, 7) < currentMonthKey)
+        .filter((item) => item.date.slice(0, 7) < summaryMonthKey)
         .map((expense) => ({
           id: `expense-${expense.id}`,
           title: expense.description,
@@ -1163,7 +1292,7 @@ function App() {
       })),
       saldoAnterior: previousMovements,
     }
-  }, [currentMonthKey, monthExpenses, monthIncomes, state.expenses, state.incomes, state.pockets])
+  }, [monthExpenses, monthIncomes, state.expenses, state.incomes, state.pockets, summaryMonthKey])
 
   const summaryAnalytics = useMemo(() => {
     const maxFlowBase = Math.max(
@@ -1206,12 +1335,12 @@ function App() {
         ...debt,
         paidAmount,
         ratio: debt.totalAmount > 0 ? paidAmount / debt.totalAmount : 0,
-        estimatedPayoffMonth: getMonthKeyFromOffset(currentMonthKey, estimatedMonthsLeft - 1),
+        estimatedPayoffMonth: getMonthKeyFromOffset(summaryMonthKey, estimatedMonthsLeft - 1),
       }
     })
 
     const monthTrend = Array.from({ length: 6 }, (_, index) => {
-      const monthKey = getMonthKeyFromOffset(currentMonthKey, index - 5)
+      const monthKey = getMonthKeyFromOffset(summaryMonthKey, index - 5)
       const income = state.incomes
         .filter((item) => item.date.startsWith(monthKey))
         .reduce((sum, item) => sum + item.amount, 0)
@@ -1231,10 +1360,11 @@ function App() {
       1,
     )
 
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const [summaryYear, summaryMonth] = summaryMonthKey.split('-').map(Number)
+    const daysInMonth = new Date(summaryYear, summaryMonth, 0).getDate()
     const dailyTrend = Array.from({ length: daysInMonth }, (_, index) => {
       const day = String(index + 1).padStart(2, '0')
-      const date = `${currentMonthKey}-${day}`
+      const date = `${summaryMonthKey}-${day}`
       const income = monthIncomes.filter((item) => item.date === date).reduce((sum, item) => sum + item.amount, 0)
       const expense = monthExpenses.filter((item) => item.date === date).reduce((sum, item) => sum + item.amount, 0)
       return {
@@ -1256,7 +1386,7 @@ function App() {
       dailyTrend,
       maxDailyNet,
     }
-  }, [activeDebts, currentMonthKey, monthExpenses, monthIncomes, now, pocketBalances, state.categories, state.expenses, state.incomes, state.pockets, totals])
+  }, [activeDebts, monthExpenses, monthIncomes, pocketBalances, state.categories, state.expenses, state.incomes, state.pockets, summaryMonthKey, totals])
 
   const debtPaymentHistory = useMemo(() => {
     return state.debtPayments.reduce<Record<string, DebtPayment[]>>((acc, payment) => {
@@ -1510,61 +1640,67 @@ function App() {
   }
 
   function handleDeleteMovement(kind: MovementKind, movementId: string) {
-    let movementDate = today
-    let isRetroactive = false
+    const actionKey = `movimientos:eliminar:${kind}:${movementId}`
+    if (!beginAction(actionKey)) return
+    try {
+      let movementDate = today
+      let isRetroactive = false
 
-    if (kind === 'gasto') {
-      const expense = state.expenses.find((item) => item.id === movementId)
-      if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return
-      movementDate = expense.date
-      isRetroactive = expense.date.slice(0, 7) < currentMonthKey
-    } else if (kind === 'ingreso') {
-      const income = state.incomes.find((item) => item.id === movementId)
-      if (income) {
-        movementDate = income.date
-        isRetroactive = income.date.slice(0, 7) < currentMonthKey
-      }
-    } else {
-      const transfer = state.transfers.find((item) => item.id === movementId)
-      if (transfer) {
-        movementDate = transfer.date
-        isRetroactive = transfer.date.slice(0, 7) < currentMonthKey
-      }
-    }
-
-    let confirmMsg = 'Este movimiento se eliminara de forma permanente.'
-    if (isRetroactive) {
-      const monthsImpacted = getMonthsImpacted(movementDate, currentMonthKey)
-      const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
-      confirmMsg = `Este movimiento pertenece a ${formatMonthName(movementDate.slice(0, 7))}. Si lo eliminas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
-    }
-
-    if (!window.confirm(confirmMsg)) return
-
-    setState((current) => {
       if (kind === 'gasto') {
-        return {
-          ...current,
-          expenses: current.expenses.filter((item) => item.id !== movementId),
+        const expense = state.expenses.find((item) => item.id === movementId)
+        if (!expense || (expense.source !== 'manual' && expense.source !== 'wallet')) return
+        movementDate = expense.date
+        isRetroactive = expense.date.slice(0, 7) < currentMonthKey
+      } else if (kind === 'ingreso') {
+        const income = state.incomes.find((item) => item.id === movementId)
+        if (income) {
+          movementDate = income.date
+          isRetroactive = income.date.slice(0, 7) < currentMonthKey
+        }
+      } else {
+        const transfer = state.transfers.find((item) => item.id === movementId)
+        if (transfer) {
+          movementDate = transfer.date
+          isRetroactive = transfer.date.slice(0, 7) < currentMonthKey
         }
       }
 
-      if (kind === 'ingreso') {
+      let confirmMsg = 'Este movimiento se eliminara de forma permanente.'
+      if (isRetroactive) {
+        const monthsImpacted = getMonthsImpacted(movementDate, currentMonthKey)
+        const monthsNames = monthsImpacted.map(formatMonthName).join(', ')
+        confirmMsg = `Este movimiento pertenece a ${formatMonthName(movementDate.slice(0, 7))}. Si lo eliminas, se recalcularán los resultados de: ${monthsNames}. ¿Quieres continuar?`
+      }
+
+      if (!window.confirm(confirmMsg)) return
+
+      setState((current) => {
+        if (kind === 'gasto') {
+          return {
+            ...current,
+            expenses: current.expenses.filter((item) => item.id !== movementId),
+          }
+        }
+
+        if (kind === 'ingreso') {
+          return {
+            ...current,
+            incomes: current.incomes.filter((item) => item.id !== movementId),
+          }
+        }
+
         return {
           ...current,
-          incomes: current.incomes.filter((item) => item.id !== movementId),
+          transfers: current.transfers.filter((item) => item.id !== movementId),
         }
-      }
+      })
 
-      return {
-        ...current,
-        transfers: current.transfers.filter((item) => item.id !== movementId),
-      }
-    })
-
-    if (expenseForm.id === movementId) resetExpenseForm()
-    if (incomeForm.id === movementId) resetIncomeForm()
-    if (transferForm.id === movementId) resetTransferForm()
+      if (expenseForm.id === movementId) resetExpenseForm()
+      if (incomeForm.id === movementId) resetIncomeForm()
+      if (transferForm.id === movementId) resetTransferForm()
+    } finally {
+      endAction(actionKey, 650)
+    }
   }
 
   function handleAddExpense(event: React.FormEvent<HTMLFormElement>) {
@@ -1579,28 +1715,32 @@ function App() {
 
     const pocketId = expenseForm.pocketId
     const pocketName = getPocketName(state.pockets, pocketId)
+    const balances = computePocketBalances(state)
+    const existingExpense = expenseForm.id
+      ? state.expenses.find((item) => item.id === expenseForm.id)
+      : undefined
+    const availableBalance =
+      (balances[pocketId] ?? 0) +
+      (existingExpense && existingExpense.pocketId === pocketId ? existingExpense.amount : 0)
 
+    if (numericAmount > availableBalance) {
+      showUiNotice(
+        'Saldo insuficiente',
+        `El bolsillo "${pocketName}" tiene ${money.format(
+          availableBalance,
+        )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`,
+      )
+      return
+    }
+
+    const actionKey = expenseForm.id ? 'movimientos:guardar-gasto' : 'movimientos:registrar-gasto'
     const executeAddExpense = () => {
-      let didSave = false
-      const noticeToShow = { current: null as null | { title: string; message: string } }
-
-      setState((current) => {
-        const balances = computePocketBalances(current)
+      if (!beginAction(actionKey)) return
+      try {
+        setState((current) => {
         const currentExpense = expenseForm.id
           ? current.expenses.find((item) => item.id === expenseForm.id)
           : undefined
-        const availableBalance =
-          (balances[pocketId] ?? 0) +
-          (currentExpense && currentExpense.pocketId === pocketId ? currentExpense.amount : 0)
-
-        if (numericAmount > availableBalance) {
-          const title = 'Saldo insuficiente'
-          const message = `El bolsillo "${pocketName}" tiene ${money.format(
-            availableBalance,
-          )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`
-          noticeToShow.current = { title, message }
-          return current
-        }
 
         const selectedCategory = expenseForm.category
         const selectedConfidence = getCategoryConfidenceForSelection(
@@ -1642,7 +1782,6 @@ function App() {
           }
         })
 
-        didSave = true
         return {
           ...current,
           learningRules,
@@ -1650,17 +1789,13 @@ function App() {
             ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
             : [expense, ...current.expenses],
         }
-      })
+        })
 
-      if (noticeToShow.current) {
-        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
-        return
+        resetExpenseForm()
+        setOpenComposer(null)
+      } finally {
+        endAction(actionKey)
       }
-
-      if (!didSave) return
-
-      resetExpenseForm()
-      setOpenComposer(null)
     }
 
     if (isRetroactive) {
@@ -1683,17 +1818,20 @@ function App() {
 	    const fallbackTime = getCurrentTimeHHmm()
 	    const isRetroactive = incomeDate.slice(0, 7) < currentMonthKey
 
+    const actionKey = incomeForm.id ? 'movimientos:guardar-ingreso' : 'movimientos:registrar-ingreso'
     const executeAddIncome = () => {
-      setState((current) => {
-	        const income: Income = {
-	          id: incomeForm.id || crypto.randomUUID(),
-	          title: incomeForm.title.trim(),
-	          amount: numericAmount,
-	          pocketId: incomeForm.pocketId,
-	          date: incomeDate,
-	          time: current.incomes.find((item) => item.id === incomeForm.id)?.time ?? fallbackTime,
-	          recurring: incomeForm.recurring,
-	        }
+      if (!beginAction(actionKey)) return
+      try {
+        setState((current) => {
+		        const income: Income = {
+		          id: incomeForm.id || crypto.randomUUID(),
+		          title: incomeForm.title.trim(),
+		          amount: numericAmount,
+		          pocketId: incomeForm.pocketId,
+		          date: incomeDate,
+		          time: current.incomes.find((item) => item.id === incomeForm.id)?.time ?? fallbackTime,
+		          recurring: incomeForm.recurring,
+		        }
 
         return {
           ...current,
@@ -1701,10 +1839,13 @@ function App() {
             ? current.incomes.map((item) => (item.id === incomeForm.id ? income : item))
             : [income, ...current.incomes],
         }
-      })
+        })
 
-      resetIncomeForm()
-      setOpenComposer(null)
+        resetIncomeForm()
+        setOpenComposer(null)
+      } finally {
+        endAction(actionKey)
+      }
     }
 
     if (isRetroactive) {
@@ -1735,59 +1876,56 @@ function App() {
 	    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
     const fromPocketId = transferForm.fromPocketId
     const fromPocketName = getPocketName(state.pockets, fromPocketId)
+    const transferBalances = computePocketBalances(state)
+    const existingTransfer = transferForm.id
+      ? state.transfers.find((item) => item.id === transferForm.id)
+      : undefined
+    const transferAvailableBalance =
+      (transferBalances[fromPocketId] ?? 0) +
+      (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
 
-	    const executeAddTransfer = () => {
-        let didSave = false
-        const noticeToShow = { current: null as null | { title: string; message: string } }
-
-	      setState((current) => {
-          const balances = computePocketBalances(current)
-          const existingTransfer = transferForm.id
-            ? current.transfers.find((item) => item.id === transferForm.id)
-            : undefined
-          const availableBalance =
-            (balances[fromPocketId] ?? 0) +
-            (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
-
-          if (numericAmount > availableBalance) {
-            const title = 'Saldo insuficiente'
-            const message = `El bolsillo "${fromPocketName}" tiene ${money.format(
-              availableBalance,
-            )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`
-            noticeToShow.current = { title, message }
-            return current
-          }
-
-	        const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
-	        const transfer: Transfer = {
-	          id: transferForm.id || crypto.randomUUID(),
-	          fromPocketId: transferForm.fromPocketId,
-	          toPocketId: transferForm.toPocketId,
-	          amount: numericAmount,
-	          date: transferDate,
-	          time: currentTransfer?.time ?? fallbackTime,
-	          note: transferForm.note.trim(),
-	        }
-
-        didSave = true
-        return {
-          ...current,
-          transfers: transferForm.id
-            ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
-            : [transfer, ...current.transfers],
-        }
-      })
-
-      if (noticeToShow.current) {
-        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
-        return
-      }
-
-      if (!didSave) return
-
-      resetTransferForm()
-      setOpenComposer(null)
+    if (numericAmount > transferAvailableBalance) {
+      showUiNotice(
+        'Saldo insuficiente',
+        `El bolsillo "${fromPocketName}" tiene ${money.format(
+          transferAvailableBalance,
+        )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`,
+      )
+      return
     }
+
+		    const actionKey = transferForm.id
+		      ? 'movimientos:guardar-transferencia'
+		      : 'movimientos:ejecutar-transferencia'
+		    const executeAddTransfer = () => {
+		      if (!beginAction(actionKey)) return
+		      try {
+			      setState((current) => {
+			        const currentTransfer = current.transfers.find((item) => item.id === transferForm.id)
+			        const transfer: Transfer = {
+			          id: transferForm.id || crypto.randomUUID(),
+			          fromPocketId: transferForm.fromPocketId,
+		          toPocketId: transferForm.toPocketId,
+		          amount: numericAmount,
+		          date: transferDate,
+		          time: currentTransfer?.time ?? fallbackTime,
+			          note: transferForm.note.trim(),
+			        }
+
+		        return {
+		          ...current,
+		          transfers: transferForm.id
+		            ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
+		            : [transfer, ...current.transfers],
+		        }
+		      })
+
+		      resetTransferForm()
+		      setOpenComposer(null)
+		      } finally {
+		        endAction(actionKey)
+		      }
+		    }
 
     if (isRetroactive) {
       const monthsImpacted = getMonthsImpacted(transferDate, currentMonthKey)
@@ -1805,40 +1943,46 @@ function App() {
     const numericAmount = Number(fixedForm.amount)
     const numericDay = Number(fixedForm.dueDay)
     const numericConfirmationDay = Number(fixedForm.confirmationDay)
-    if (
-      !fixedForm.title.trim() ||
-      numericAmount <= 0 ||
+	    if (
+	      !fixedForm.title.trim() ||
+	      numericAmount <= 0 ||
       numericDay < 1 ||
       numericDay > 31 ||
       numericConfirmationDay < 1 ||
       numericConfirmationDay > 31
-    ) {
-      return
-    }
+	    ) {
+	      return
+	    }
 
-    setState((current) => {
-      const nextFixed: FixedExpense = {
-        id: fixedForm.id || crypto.randomUUID(),
-        title: fixedForm.title.trim(),
-        amount: numericAmount,
-        dueDay: numericDay,
-        confirmationDay: numericConfirmationDay,
-        pocketId: fixedForm.pocketId,
-        category: fixedForm.category,
-        active: true,
-        lastPaidMonth: current.fixedExpenses.find((item) => item.id === fixedForm.id)?.lastPaidMonth,
-      }
+	    const actionKey = fixedForm.id ? 'obligaciones:guardar' : 'obligaciones:registrar'
+	    if (!beginAction(actionKey)) return
+	    try {
+	      setState((current) => {
+	        const nextFixed: FixedExpense = {
+	          id: fixedForm.id || crypto.randomUUID(),
+	          title: fixedForm.title.trim(),
+	          amount: numericAmount,
+	          dueDay: numericDay,
+	          confirmationDay: numericConfirmationDay,
+	          pocketId: fixedForm.pocketId,
+	          category: fixedForm.category,
+	          active: true,
+	          lastPaidMonth: current.fixedExpenses.find((item) => item.id === fixedForm.id)?.lastPaidMonth,
+	        }
 
-      return {
-        ...current,
-        fixedExpenses: fixedForm.id
-          ? current.fixedExpenses.map((item) => (item.id === fixedForm.id ? nextFixed : item))
-          : [nextFixed, ...current.fixedExpenses],
-      }
-    })
+	        return {
+	          ...current,
+	          fixedExpenses: fixedForm.id
+	            ? current.fixedExpenses.map((item) => (item.id === fixedForm.id ? nextFixed : item))
+	            : [nextFixed, ...current.fixedExpenses],
+	        }
+	      })
 
-    resetFixedForm()
-    setOpenComposer(null)
+	      resetFixedForm()
+	      setOpenComposer(null)
+	    } finally {
+	      endAction(actionKey)
+	    }
   }
 
   function handleAddPocket(event: React.FormEvent<HTMLFormElement>) {
@@ -1854,17 +1998,26 @@ function App() {
       type: pocketForm.type,
     }
 
-    setState((current) => ({
-      ...current,
-      pockets: pocketForm.id
-        ? current.pockets.map((item) => (item.id === pocketForm.id ? newPocket : item))
-        : [...current.pockets, newPocket],
-    }))
-    resetPocketForm()
-    setOpenComposer(null)
+    const actionKey = pocketForm.id ? 'bolsillos:guardar' : 'bolsillos:crear'
+    if (!beginAction(actionKey)) return
+    try {
+      setState((current) => ({
+        ...current,
+        pockets: pocketForm.id
+          ? current.pockets.map((item) => (item.id === pocketForm.id ? newPocket : item))
+          : [...current.pockets, newPocket],
+      }))
+      resetPocketForm()
+      setOpenComposer(null)
+    } finally {
+      endAction(actionKey)
+    }
   }
 
   function handleDeletePocket(pocketId: string) {
+    const actionKey = `bolsillos:eliminar:${pocketId}`
+    if (!beginAction(actionKey)) return
+    try {
     const targetPocket = state.pockets.find((item) => item.id === pocketId)
     if (!targetPocket) return
 
@@ -1900,81 +2053,62 @@ function App() {
 
     resetPocketForm()
     setOpenComposer(null)
+    } finally {
+      endAction(actionKey, 650)
+    }
   }
 
-	  function handlePayFixedExpense(
-	    fixedId: string,
-	    paymentPocketId?: string,
-	    paymentDate?: string,
-	  ) {
-	    let didPay = false
-      const noticeToShow = { current: null as null | { title: string; message: string } }
+	  function handlePayFixedExpense(fixedId: string, paymentPocketId?: string, paymentDate?: string) {
+	    const actionKey = `obligaciones:pagar:${fixedId}`
+	    if (!beginAction(actionKey)) return false
+	    try {
+	    const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
+	    const effectiveDate = paymentDate || today
+	    const effectiveMonthKey = effectiveDate.slice(0, 7)
+	    if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return false
+
+	    const resolvedPocketId = paymentPocketId || fixed.pocketId
+	    const balances = computePocketBalances(state)
+	    const availableBalance = balances[resolvedPocketId] ?? 0
+	    if (fixed.amount > availableBalance) {
+	      showUiNotice(
+	        'Saldo insuficiente',
+	        `El bolsillo "${getPocketName(state.pockets, resolvedPocketId)}" tiene ${money.format(
+	          availableBalance,
+	        )} disponibles y estás intentando pagar ${money.format(fixed.amount)}.`,
+	      )
+	      return false
+	    }
 
 	    setState((current) => {
-	      const fixed = current.fixedExpenses.find((item) => item.id === fixedId)
-	      const effectiveDate = paymentDate || today
-	      const effectiveMonthKey = effectiveDate.slice(0, 7)
-
-      if (!fixed || fixed.lastPaidMonth === effectiveMonthKey) return current
-
-      const resolvedPocketId = paymentPocketId || fixed.pocketId
-      const balances = computePocketBalances(current)
-	      const availableBalance = balances[resolvedPocketId] ?? 0
-
-	      if (fixed.amount > availableBalance) {
-	        const title = 'Saldo insuficiente'
-	        const message = `El bolsillo "${getPocketName(state.pockets, resolvedPocketId)}" tiene ${money.format(
-	          availableBalance,
-	        )} disponibles y estás intentando pagar ${money.format(fixed.amount)}.`
-          noticeToShow.current = { title, message }
-	        return current
-	      }
-
-      const resolvedBalance = (() => {
-        let balance = 0
-        current.incomes.forEach((income) => {
-          if (income.pocketId === resolvedPocketId) balance += income.amount
-        })
-        current.expenses.forEach((expense) => {
-          if (expense.pocketId === resolvedPocketId) balance -= expense.amount
-        })
-        current.transfers.forEach((transfer) => {
-          if (transfer.fromPocketId === resolvedPocketId) balance -= transfer.amount
-          if (transfer.toPocketId === resolvedPocketId) balance += transfer.amount
-        })
-        return balance
-      })()
-
-      if (fixed.amount > resolvedBalance) return current
+	      const currentFixed = current.fixedExpenses.find((item) => item.id === fixedId)
+	      if (!currentFixed || currentFixed.lastPaidMonth === effectiveMonthKey) return current
 
 	      const expense: Expense = {
 	        id: crypto.randomUUID(),
-	        description: fixed.title,
-	        amount: fixed.amount,
+	        description: currentFixed.title,
+	        amount: currentFixed.amount,
 	        pocketId: resolvedPocketId,
 	        date: effectiveDate,
 	        time: getCurrentTimeHHmm(),
 	        source: 'fixed',
-	        category: fixed.category,
+	        category: currentFixed.category,
 	        confidence: 1,
 	      }
 
-	      didPay = true
-		      return {
-		        ...current,
-		        expenses: [expense, ...current.expenses],
-		        fixedExpenses: current.fixedExpenses.map((item) =>
-		          item.id === fixedId ? { ...item, lastPaidMonth: effectiveMonthKey } : item,
-		        ),
-		      }
-		    })
+	      return {
+	        ...current,
+	        expenses: [expense, ...current.expenses],
+	        fixedExpenses: current.fixedExpenses.map((item) =>
+	          item.id === fixedId ? { ...item, lastPaidMonth: effectiveMonthKey } : item,
+	        ),
+	      }
+	    })
 
-      if (noticeToShow.current) {
-        showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
-        return false
-      }
-
-	      return didPay
+	    return true
+	    } finally {
+	      endAction(actionKey)
+	    }
 	  }
 
 	  function handleConfirmFixedPayment(event: React.FormEvent<HTMLFormElement>) {
@@ -2006,134 +2140,123 @@ function App() {
     const installmentAmount = Number(debtForm.installmentAmount)
     const dueDay = Number(debtForm.dueDay)
 
-    if (
-      !debtForm.title.trim() ||
+	    if (
+	      !debtForm.title.trim() ||
       totalAmount <= 0 ||
       installmentAmount <= 0 ||
       dueDay < 1 ||
       dueDay > 31
-    ) {
-      return
-    }
+	    ) {
+	      return
+	    }
 
-    setState((current) => {
-      const existing = current.debts.find((item) => item.id === debtForm.id)
-      const paidAmount = existing ? existing.totalAmount - existing.remainingAmount : 0
-      const remainingAmount = Math.max(0, totalAmount - paidAmount)
-      const nextDebt: Debt = {
-        id: debtForm.id || crypto.randomUUID(),
-        title: debtForm.title.trim(),
-        totalAmount,
-        remainingAmount,
-        installmentAmount,
-        dueDay,
-        pocketId: debtForm.pocketId,
-        category: debtForm.category,
-        active: remainingAmount > 0,
-      }
+	    const actionKey = debtForm.id ? 'deudas:guardar' : 'deudas:crear'
+	    if (!beginAction(actionKey)) return
+	    try {
+	      setState((current) => {
+	        const existing = current.debts.find((item) => item.id === debtForm.id)
+	        const paidAmount = existing ? existing.totalAmount - existing.remainingAmount : 0
+	        const remainingAmount = Math.max(0, totalAmount - paidAmount)
+	        const nextDebt: Debt = {
+	          id: debtForm.id || crypto.randomUUID(),
+	          title: debtForm.title.trim(),
+	          totalAmount,
+	          remainingAmount,
+	          installmentAmount,
+	          dueDay,
+	          pocketId: debtForm.pocketId,
+	          category: debtForm.category,
+	          active: remainingAmount > 0,
+	        }
 
-      return {
-        ...current,
-        debts: debtForm.id
-          ? current.debts.map((item) => (item.id === debtForm.id ? nextDebt : item))
-          : [nextDebt, ...current.debts],
-      }
-    })
+	        return {
+	          ...current,
+	          debts: debtForm.id
+	            ? current.debts.map((item) => (item.id === debtForm.id ? nextDebt : item))
+	            : [nextDebt, ...current.debts],
+	        }
+	      })
 
-    resetDebtForm()
-    setOpenComposer(null)
+	      resetDebtForm()
+	      setOpenComposer(null)
+	    } finally {
+	      endAction(actionKey)
+	    }
   }
 
-	  function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
-    let didPay = false
-    const noticeToShow = { current: null as null | { title: string; message: string } }
+		  function handlePayDebt(debtId: string, kind: 'scheduled' | 'extra' = 'scheduled') {
+		    const actionKey = `deudas:pagar:${debtId}`
+		    if (!beginAction(actionKey)) return
+		    try {
+		    const debt = state.debts.find((item) => item.id === debtId)
+		    if (!debt || !debt.active || debt.remainingAmount <= 0) return
 
-    setState((current) => {
-      const debt = current.debts.find((item) => item.id === debtId)
-      if (!debt || !debt.active || debt.remainingAmount <= 0) return current
+	    const draftAmount = Number(debtPaymentDrafts[debtId] || debt.installmentAmount)
+	    const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
+	    if (paymentAmount <= 0) return
 
-      const draftAmount = Number(debtPaymentDrafts[debtId] || debt.installmentAmount)
-      const paymentAmount = Math.min(Math.max(draftAmount, 0), debt.remainingAmount)
-      if (paymentAmount <= 0) return current
+	    const balances = computePocketBalances(state)
+	    const availableBalance = balances[debt.pocketId] ?? 0
+	    if (paymentAmount > availableBalance) {
+	      showUiNotice(
+	        'Saldo insuficiente',
+	        `El bolsillo "${getPocketName(state.pockets, debt.pocketId)}" tiene ${money.format(
+	          availableBalance,
+	        )} disponibles y estás intentando registrar ${money.format(paymentAmount)}.`,
+	      )
+	      return
+	    }
 
-      const balances = computePocketBalances(current)
-      const availableBalance = balances[debt.pocketId] ?? 0
-      if (paymentAmount > availableBalance) {
-        const title = 'Saldo insuficiente'
-        const message = `El bolsillo "${getPocketName(state.pockets, debt.pocketId)}" tiene ${money.format(
-          availableBalance,
-        )} disponibles y estás intentando registrar ${money.format(paymentAmount)}.`
-        noticeToShow.current = { title, message }
-        return current
-      }
+	    setState((current) => {
+	      const currentDebt = current.debts.find((item) => item.id === debtId)
+	      if (!currentDebt || !currentDebt.active || currentDebt.remainingAmount <= 0) return current
 
-      const resolvedPocketId = debt.pocketId
-      const resolvedBalance = (() => {
-        let balance = 0
-        current.incomes.forEach((income) => {
-          if (income.pocketId === resolvedPocketId) balance += income.amount
-        })
-        current.expenses.forEach((expense) => {
-          if (expense.pocketId === resolvedPocketId) balance -= expense.amount
-        })
-        current.transfers.forEach((transfer) => {
-          if (transfer.fromPocketId === resolvedPocketId) balance -= transfer.amount
-          if (transfer.toPocketId === resolvedPocketId) balance += transfer.amount
-        })
-        return balance
-      })()
-
-      if (paymentAmount > resolvedBalance) return current
+	      const nextAmount = Math.min(paymentAmount, currentDebt.remainingAmount)
+	      if (nextAmount <= 0) return current
 
 	      const expense: Expense = {
 	        id: crypto.randomUUID(),
-	        description: `Abono deuda: ${debt.title}`,
-	        amount: paymentAmount,
-	        pocketId: debt.pocketId,
+	        description: `Abono deuda: ${currentDebt.title}`,
+	        amount: nextAmount,
+	        pocketId: currentDebt.pocketId,
 	        date: today,
 	        time: getCurrentTimeHHmm(),
 	        source: 'debt',
-	        category: debt.category,
+	        category: currentDebt.category,
 	        confidence: 1,
 	      }
 
-      didPay = true
-      return {
-        ...current,
-        expenses: [expense, ...current.expenses],
-        debtPayments: [
-          {
-            id: crypto.randomUUID(),
-            debtId,
-            amount: paymentAmount,
-            date: today,
-            kind,
-          },
-          ...current.debtPayments,
-        ],
-        debts: current.debts
-          .map((item) => {
-            if (item.id !== debtId) return item
-            const remaining = Math.max(0, item.remainingAmount - paymentAmount)
-            return {
-              ...item,
-              remainingAmount: remaining,
-              active: remaining > 0,
-            }
-          }),
-      }
-    })
+	      return {
+	        ...current,
+	        expenses: [expense, ...current.expenses],
+	        debtPayments: [
+	          {
+	            id: crypto.randomUUID(),
+	            debtId,
+	            amount: nextAmount,
+	            date: today,
+	            kind,
+	          },
+	          ...current.debtPayments,
+	        ],
+	        debts: current.debts.map((item) => {
+	          if (item.id !== debtId) return item
+	          const remaining = Math.max(0, item.remainingAmount - nextAmount)
+	          return {
+	            ...item,
+	            remainingAmount: remaining,
+	            active: remaining > 0,
+	          }
+	        }),
+	      }
+	    })
 
-    if (noticeToShow.current) {
-      showUiNotice(noticeToShow.current.title, noticeToShow.current.message)
-      return
-    }
-
-    if (!didPay) return
-
-    setDebtPaymentDrafts((current) => ({ ...current, [debtId]: '' }))
-    setOpenDebtPaymentId(null)
-	  }
+		    setDebtPaymentDrafts((current) => ({ ...current, [debtId]: '' }))
+		    setOpenDebtPaymentId(null)
+		    } finally {
+		      endAction(actionKey)
+		    }
+		  }
 
   function handleAddCategory(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2148,27 +2271,39 @@ function App() {
   }
 
   function handleRemoveCategory(category: Category) {
-    if (state.categories.length <= 1) return
-    if (!window.confirm(`La categoria ${category} se reemplazara por Otros en los registros actuales.`)) return
+    const actionKey = `categorias:eliminar:${category}`
+    if (!beginAction(actionKey)) return
+    try {
+      if (state.categories.length <= 1) return
+      if (!window.confirm(`La categoria ${category} se reemplazara por Otros en los registros actuales.`)) return
 
-    setState((current) => ({
-      ...current,
-      categories: current.categories.filter((item) => item !== category),
-      expenses: current.expenses.map((expense) =>
-        expense.category === category ? { ...expense, category: 'Otros' } : expense,
-      ),
-      fixedExpenses: current.fixedExpenses.map((fixed) =>
-        fixed.category === category ? { ...fixed, category: 'Otros' } : fixed,
-      ),
-      learningRules: current.learningRules.filter((rule) => rule.category !== category),
-    }))
+      setState((current) => ({
+        ...current,
+        categories: current.categories.filter((item) => item !== category),
+        expenses: current.expenses.map((expense) =>
+          expense.category === category ? { ...expense, category: 'Otros' } : expense,
+        ),
+        fixedExpenses: current.fixedExpenses.map((fixed) =>
+          fixed.category === category ? { ...fixed, category: 'Otros' } : fixed,
+        ),
+        learningRules: current.learningRules.filter((rule) => rule.category !== category),
+      }))
+    } finally {
+      endAction(actionKey, 650)
+    }
   }
 
   function handleRemoveLearningRule(keyword: string) {
-    setState((current) => ({
-      ...current,
-      learningRules: current.learningRules.filter((rule) => rule.keyword !== keyword),
-    }))
+    const actionKey = `reglas:eliminar:${keyword}`
+    if (!beginAction(actionKey)) return
+    try {
+      setState((current) => ({
+        ...current,
+        learningRules: current.learningRules.filter((rule) => rule.keyword !== keyword),
+      }))
+    } finally {
+      endAction(actionKey, 650)
+    }
   }
 
   function updatePocketTypeLabels(value: AppConfig['pocketTypeLabels']) {
@@ -2403,10 +2538,12 @@ function App() {
         suggestion.category,
         suggestion.confidence,
       )
-      const selectedCategoryConfidenceLabel = getConfidenceLabel(selectedCategoryConfidence)
-      const isSuggestedCategorySelected = expenseForm.category === suggestion.category
-      const categoryLearningKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
-      const isExpenseFormValid = Number(expenseForm.amount) > 0
+	      const selectedCategoryConfidenceLabel = getConfidenceLabel(selectedCategoryConfidence)
+	      const isSuggestedCategorySelected = expenseForm.category === suggestion.category
+	      const categoryLearningKeywords = deriveLearningKeywords(expenseForm.description, suggestion.matches)
+	      const isExpenseFormValid = Number(expenseForm.amount) > 0
+	      const expenseActionKey = expenseForm.id ? 'movimientos:guardar-gasto' : 'movimientos:registrar-gasto'
+	      const isExpenseBusy = Boolean(actionLoading[expenseActionKey])
 
       return (
         <form className="bank-form movement-form" onSubmit={handleAddExpense}>
@@ -2511,12 +2648,18 @@ function App() {
             </section>
           </div>
 
-          <div className="composer-action-row movement-form-actions">
-            <button type="submit" disabled={!isExpenseFormValid}>
-              {expenseForm.id ? 'Guardar gasto' : 'Registrar salida'}
-            </button>
-            {expenseForm.id && (
-              <button
+	          <div className="composer-action-row movement-form-actions">
+	            <button type="submit" disabled={!isExpenseFormValid || isExpenseBusy}>
+	              {isExpenseBusy
+	                ? expenseForm.id
+	                  ? 'Guardando...'
+	                  : 'Registrando...'
+	                : expenseForm.id
+	                  ? 'Guardar gasto'
+	                  : 'Registrar salida'}
+	            </button>
+	            {expenseForm.id && (
+	              <button
                 type="button"
                 className="secondary-button cancel-action"
                 onClick={() => {
@@ -2579,11 +2722,13 @@ function App() {
       )
     }
 
-    if (activeModule === 'ingreso') {
-      const selectedIncomePocketName = getPocketName(state.pockets, incomeForm.pocketId)
-      const isIncomeFormValid = Number(incomeForm.amount) > 0
+	    if (activeModule === 'ingreso') {
+	      const selectedIncomePocketName = getPocketName(state.pockets, incomeForm.pocketId)
+	      const isIncomeFormValid = Number(incomeForm.amount) > 0
+	      const incomeActionKey = incomeForm.id ? 'movimientos:guardar-ingreso' : 'movimientos:registrar-ingreso'
+	      const isIncomeBusy = Boolean(actionLoading[incomeActionKey])
 
-      return (
+	      return (
         <form className="bank-form movement-form" onSubmit={handleAddIncome}>
           <div className="movement-form-layout">
             <section className="movement-form-card movement-form-main">
@@ -2646,12 +2791,18 @@ function App() {
             </section>
           </div>
 
-          <div className="composer-action-row movement-form-actions">
-            <button type="submit" disabled={!isIncomeFormValid}>
-              {incomeForm.id ? 'Guardar ingreso' : 'Registrar ingreso'}
-            </button>
-            {incomeForm.id && (
-              <button
+	          <div className="composer-action-row movement-form-actions">
+	            <button type="submit" disabled={!isIncomeFormValid || isIncomeBusy}>
+	              {isIncomeBusy
+	                ? incomeForm.id
+	                  ? 'Guardando...'
+	                  : 'Registrando...'
+	                : incomeForm.id
+	                  ? 'Guardar ingreso'
+	                  : 'Registrar ingreso'}
+	            </button>
+	            {incomeForm.id && (
+	              <button
                 type="button"
                 className="secondary-button cancel-action"
                 onClick={() => {
@@ -2696,14 +2847,18 @@ function App() {
       )
     }
 
-    if (activeModule === 'transferencia') {
-      const fromPocketName = getPocketName(state.pockets, transferForm.fromPocketId)
-      const toPocketName = getPocketName(state.pockets, transferForm.toPocketId)
-      const isTransferFormValid =
-        transferForm.fromPocketId !== transferForm.toPocketId &&
-        Number(transferForm.amount) > 0 &&
-        transferForm.fromPocketId.trim().length > 0 &&
-        transferForm.toPocketId.trim().length > 0
+	    if (activeModule === 'transferencia') {
+	      const fromPocketName = getPocketName(state.pockets, transferForm.fromPocketId)
+	      const toPocketName = getPocketName(state.pockets, transferForm.toPocketId)
+	      const transferActionKey = transferForm.id
+	        ? 'movimientos:guardar-transferencia'
+	        : 'movimientos:ejecutar-transferencia'
+	      const isTransferBusy = Boolean(actionLoading[transferActionKey])
+	      const isTransferFormValid =
+	        transferForm.fromPocketId !== transferForm.toPocketId &&
+	        Number(transferForm.amount) > 0 &&
+	        transferForm.fromPocketId.trim().length > 0 &&
+	        transferForm.toPocketId.trim().length > 0
 
       return (
         <form className="bank-form movement-form" onSubmit={handleAddTransfer}>
@@ -2783,12 +2938,18 @@ function App() {
             </section>
           </div>
 
-          <div className="composer-action-row movement-form-actions">
-            <button type="submit" disabled={!isTransferFormValid}>
-              {transferForm.id ? 'Guardar transferencia' : 'Ejecutar transferencia'}
-            </button>
-            {transferForm.id && (
-              <button
+	          <div className="composer-action-row movement-form-actions">
+	            <button type="submit" disabled={!isTransferFormValid || isTransferBusy}>
+	              {isTransferBusy
+	                ? transferForm.id
+	                  ? 'Guardando...'
+	                  : 'Ejecutando...'
+	                : transferForm.id
+	                  ? 'Guardar transferencia'
+	                  : 'Ejecutar transferencia'}
+	            </button>
+	            {transferForm.id && (
+	              <button
                 type="button"
                 className="secondary-button cancel-action"
                 onClick={() => {
@@ -2827,9 +2988,11 @@ function App() {
       )
     }
 
-    if (activeModule === 'fijos') {
-      return (
-        <form className="bank-form" onSubmit={handleAddFixedExpense}>
+	    if (activeModule === 'fijos') {
+	      const fixedActionKey = fixedForm.id ? 'obligaciones:guardar' : 'obligaciones:registrar'
+	      const isFixedBusy = Boolean(actionLoading[fixedActionKey])
+	      return (
+	        <form className="bank-form" onSubmit={handleAddFixedExpense}>
           <label>
             Nombre del gasto fijo
             <input
@@ -2855,22 +3018,29 @@ function App() {
             <label>
               Dia de pago
               <input
-                type="number"
-                min="1"
-                max="31"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={2}
                 value={fixedForm.dueDay}
-                onChange={(event) => setFixedForm((current) => ({ ...current, dueDay: event.target.value }))}
+                onChange={(event) =>
+                  setFixedForm((current) => ({ ...current, dueDay: keepOnlyDigits(event.target.value).slice(0, 2) }))
+                }
               />
             </label>
             <label>
               Dia de confirmacion
               <input
-                type="number"
-                min="1"
-                max="31"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={2}
                 value={fixedForm.confirmationDay}
                 onChange={(event) =>
-                  setFixedForm((current) => ({ ...current, confirmationDay: event.target.value }))
+                  setFixedForm((current) => ({
+                    ...current,
+                    confirmationDay: keepOnlyDigits(event.target.value).slice(0, 2),
+                  }))
                 }
               />
             </label>
@@ -2903,7 +3073,15 @@ function App() {
               ))}
             </select>
           </label>
-          <button type="submit">{fixedForm.id ? 'Guardar obligacion' : 'Registrar obligacion'}</button>
+	          <button type="submit" disabled={isFixedBusy}>
+	            {isFixedBusy
+	              ? fixedForm.id
+	                ? 'Guardando...'
+	                : 'Registrando...'
+	              : fixedForm.id
+	                ? 'Guardar obligacion'
+	                : 'Registrar obligacion'}
+	          </button>
           {fixedForm.id && (
             <button
               type="button"
@@ -2920,8 +3098,11 @@ function App() {
       )
     }
 
-    return (
-      <form className="bank-form" onSubmit={handleAddPocket}>
+	    const pocketActionKey = pocketForm.id ? 'bolsillos:guardar' : 'bolsillos:crear'
+	    const isPocketBusy = Boolean(actionLoading[pocketActionKey])
+
+	    return (
+	      <form className="bank-form" onSubmit={handleAddPocket}>
         <label>
           Nombre del bolsillo
           <input
@@ -2980,15 +3161,24 @@ function App() {
             <p>Saldo inicial {money.format(0)}</p>
           </div>
         </div>
-        <button type="submit">{pocketForm.id ? 'Guardar bolsillo' : 'Crear bolsillo'}</button>
+	        <button type="submit" disabled={isPocketBusy}>
+	          {isPocketBusy
+	            ? pocketForm.id
+	              ? 'Guardando...'
+	              : 'Creando...'
+	            : pocketForm.id
+	              ? 'Guardar bolsillo'
+	              : 'Crear bolsillo'}
+	        </button>
         {pocketForm.id && (
           <div className="composer-action-row">
             <button
               type="button"
               className="secondary-button delete-action"
+              disabled={Boolean(actionLoading[`bolsillos:eliminar:${pocketForm.id}`])}
               onClick={() => handleDeletePocket(pocketForm.id)}
             >
-              Eliminar bolsillo
+              {actionLoading[`bolsillos:eliminar:${pocketForm.id}`] ? 'Eliminando...' : 'Eliminar bolsillo'}
             </button>
             <button
               type="button"
@@ -3015,9 +3205,18 @@ function App() {
               <div>
                 <span className="micro-label">Balance</span>
                 <strong>{money.format(totals.pocketBalance)}</strong>
-                <p className="panel-subtitle">Total conciliado entre saldo arrastrado e impacto del mes actual.</p>
+                <p className="panel-subtitle">
+                  Total conciliado entre saldo arrastrado e impacto de {formatMonthName(summaryMonthKey)}.
+                </p>
               </div>
-              <small>{totals.netFlow >= 0 ? 'Flujo positivo' : 'Flujo negativo'}</small>
+              <label className="summary-month-selector">
+                <span>Mes del resumen</span>
+                <input
+                  type="month"
+                  value={summaryMonthKey}
+                  onChange={(event) => setSummaryMonthKey(event.target.value || currentMonthKey)}
+                />
+              </label>
             </div>
             <div className="portfolio-metrics summary-reconciliation-grid">
               <div className="reconciliation-row interactive expandable-row" onClick={() => setActiveSummaryBreakdown('ingresos')}>
@@ -3135,7 +3334,7 @@ function App() {
           <SectionFrame
             label="Flujo"
             title="Lectura financiera"
-            subtitle="Resumen rápido de cómo está respirando tu caja este mes: cuánto entra, cuánto sale y qué presión ejerce la deuda pendiente."
+            subtitle={`Resumen rapido de ${formatMonthName(summaryMonthKey)}: cuanto entra, cuanto sale y que presion ejerce la deuda pendiente.`}
             collapsed={isSectionCollapsed('summary-lectura')}
             onToggle={() => toggleSection('summary-lectura')}
           >
@@ -3176,7 +3375,7 @@ function App() {
           <SectionFrame
             label="Comparativo"
             title="Mes contra mes"
-            subtitle={`Tomas el mes actual y lo comparas contra ${previousMonthKey} para entender si el flujo va mejor o peor.`}
+            subtitle={`${formatMonthName(summaryMonthKey)} contra ${formatMonthName(previousMonthKey)} para entender si el flujo va mejor o peor.`}
             collapsed={isSectionCollapsed('summary-mesmes')}
             onToggle={() => toggleSection('summary-mesmes')}
           >
@@ -3521,9 +3720,11 @@ function App() {
     )
   }
 
-  function renderPocketsView() {
-    if (!selectedPocket) {
-      return (
+	  function renderPocketsView() {
+	    const pocketActionKey = pocketForm.id ? 'bolsillos:guardar' : 'bolsillos:crear'
+	    const isPocketBusy = Boolean(actionLoading[pocketActionKey])
+	    if (!selectedPocket) {
+	      return (
         <section className="dashboard-grid">
           <div className="primary-column">
             <section className="panel banking-panel emphasis">
@@ -3741,16 +3942,25 @@ function App() {
                     <p>Saldo inicial {money.format(0)}</p>
                   </div>
                 </div>
-                <button type="submit">{pocketForm.id ? 'Guardar cambios' : 'Crear bolsillo'}</button>
+	                <button type="submit" disabled={isPocketBusy}>
+	                  {isPocketBusy
+	                    ? pocketForm.id
+	                      ? 'Guardando...'
+	                      : 'Creando...'
+	                    : pocketForm.id
+	                      ? 'Guardar cambios'
+	                      : 'Crear bolsillo'}
+	                </button>
                 {pocketForm.id && (
                   <div className="composer-action-row">
-                    <button
-                      type="button"
-                      className="secondary-button delete-action"
-                      onClick={() => handleDeletePocket(pocketForm.id)}
-                    >
-                      Eliminar bolsillo
-                    </button>
+	                    <button
+	                      type="button"
+	                      className="secondary-button delete-action"
+	                      disabled={Boolean(actionLoading[`bolsillos:eliminar:${pocketForm.id}`])}
+	                      onClick={() => handleDeletePocket(pocketForm.id)}
+	                    >
+	                      {actionLoading[`bolsillos:eliminar:${pocketForm.id}`] ? 'Eliminando...' : 'Eliminar bolsillo'}
+	                    </button>
                     <button
                       type="button"
                       className="secondary-button cancel-action"
@@ -3990,28 +4200,32 @@ function App() {
               className="movement-summary-grid refined movement-summary-grid-compact movement-summary-grid-premium"
               style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}
             >
-              <div className="summary-box movement-stat income">
-                <span>Entradas</span>
-                <strong>{money.format(movementSummary.inflow)}</strong>
-                <small>Flujo positivo del periodo</small>
-              </div>
-              <div className="summary-box movement-stat expense">
-                <span>Salidas</span>
-                <strong>{money.format(movementSummary.outflow)}</strong>
-                <small>{percent.format(movementExpenseRatio)} consumido</small>
-              </div>
+	              <div className="summary-box movement-stat income">
+	                <span>Entradas</span>
+	                <strong>{money.format(movementEffectiveInflow)}</strong>
+	                <small>
+	                  {movementOpeningBalance > 0
+	                    ? `Incluye saldo anterior ${money.format(movementOpeningBalance)}`
+	                    : 'Flujo positivo del periodo'}
+	                </small>
+	              </div>
+	              <div className="summary-box movement-stat expense">
+	                <span>Salidas</span>
+	                <strong>{money.format(movementEffectiveOutflow)}</strong>
+	                <small>{percent.format(movementExpenseRatio)} consumido</small>
+	              </div>
               <div className="summary-box movement-stat transfer">
                 <span>Movimientos</span>
-                <strong>{movementSummary.count}</strong>
+                <strong>{movementListSummary.count}</strong>
                 <small>Ticket medio {money.format(movementAverageTicket)}</small>
               </div>
-	              <div className="summary-box movement-stat balance neutral">
-	                <span>Balance</span>
-	                <strong>{money.format(movementSummary.inflow - movementSummary.outflow)}</strong>
-	                <small>Neto del periodo</small>
-	              </div>
-          </div>
-        </section>
+		              <div className="summary-box movement-stat balance neutral">
+		                <span>Balance</span>
+		                <strong>{money.format(movementClosingBalance)}</strong>
+		                <small>Balance del periodo</small>
+		              </div>
+	          </div>
+	        </section>
 
 	        <section className="movement-content-stack">
 	          <section className="panel banking-panel movement-ledger-panel">
@@ -4089,11 +4303,11 @@ function App() {
 	                    Limpiar
 	                  </button>
 	                )}
-	              </div>
-	            </div>
-	            <div className="ledger simple-movement-list">
-              {filteredActivity.map((item) => (
-                <article key={item.kind + item.id} className={`simple-movement-row ${item.kind}`}>
+		              </div>
+		            </div>
+		            <div className="ledger simple-movement-list">
+		              {filteredActivity.map((item) => (
+		                <article key={item.kind + item.id} className={`simple-movement-row ${item.kind}`}>
                   <div className="simple-movement-top">
                     <strong>{item.title}</strong>
                     <div className="movement-inline-menu">
@@ -4133,16 +4347,23 @@ function App() {
                             </button>
                           )}
                           {item.deletable && (
+                            (() => {
+                              const deleteActionKey = `movimientos:eliminar:${item.kind}:${item.id}`
+                              const isDeleting = Boolean(actionLoading[deleteActionKey])
+                              return (
                             <button
                               type="button"
                               className="movement-popover-action danger"
+                              disabled={isDeleting}
                               onClick={() => {
                                 setOpenMovementActionId(null)
                                 handleDeleteMovement(item.kind, item.id)
                               }}
                             >
-                              Eliminar
+                              {isDeleting ? 'Eliminando...' : 'Eliminar'}
                             </button>
+                              )
+                            })()
                           )}
                           {!item.editable && !item.deletable && (
                             <p className="movement-popover-note">
@@ -4216,11 +4437,33 @@ function App() {
 	                      </strong>
 	                    )}
 	                  </div>
-                </article>
-              ))}
-              {filteredActivity.length === 0 && (
-                <p className="empty-copy">No hay movimientos con los filtros seleccionados.</p>
-              )}
+	                </article>
+	              ))}
+	              {shouldShowMovementOpeningRow && (
+	                <article className="simple-movement-row ingreso movement-opening-row">
+	                  <div className="simple-movement-top">
+	                    <strong>Saldo anterior</strong>
+	                  </div>
+	                  <div className="simple-movement-meta">
+	                    <div className="simple-movement-meta-text">
+	                      <p>Antes de {formatMonthName(movementMonthKey)}</p>
+	                      <p className="simple-movement-method">
+	                        Cierre acumulado de meses anteriores
+	                        {movementFilters.pocketId !== 'todos'
+	                          ? ` · ${getPocketName(state.pockets, movementFilters.pocketId)}`
+	                          : ''}
+	                      </p>
+	                    </div>
+	                    <strong className={movementOpeningBalance >= 0 ? 'simple-income' : 'simple-outflow'}>
+	                      {movementOpeningBalance >= 0 ? '+' : '-'}
+	                      {money.format(Math.abs(movementOpeningBalance))}
+	                    </strong>
+	                  </div>
+	                </article>
+	              )}
+	              {filteredActivity.length === 0 && (
+	                <p className="empty-copy">No hay movimientos con los filtros seleccionados.</p>
+	              )}
             </div>
           </section>
         </section>
@@ -4242,6 +4485,8 @@ function App() {
             label="Nueva obligacion"
             title={fixedForm.id ? 'Editar obligacion' : 'Registrar obligacion'}
             description="Define monto, bolsillo, categoria y dias de pago y confirmacion."
+            toolbarClassName="no-sticky"
+            bodyClassName="scroll-on-panel"
             onClose={() => {
               resetFixedForm()
               setOpenComposer(null)
@@ -4329,13 +4574,18 @@ function App() {
                 </div>
               </section>
 
-              <div className="composer-action-row">
-                <button
-                  type="submit"
-                  className={fixedPaymentIsDueOrPast ? 'warning-button' : undefined}
-                >
-                  {fixedPaymentIsDueOrPast ? 'Confirmar pagado' : 'Adelantar pago'}
-                </button>
+	              <div className="composer-action-row">
+	                <button
+	                  type="submit"
+	                  className={fixedPaymentIsDueOrPast ? 'warning-button' : undefined}
+	                  disabled={Boolean(actionLoading[`obligaciones:pagar:${fixedPaymentTarget.id}`])}
+	                >
+	                  {actionLoading[`obligaciones:pagar:${fixedPaymentTarget.id}`]
+	                    ? 'Procesando...'
+	                    : fixedPaymentIsDueOrPast
+	                      ? 'Confirmar pagado'
+	                      : 'Adelantar pago'}
+	                </button>
                 <button
                   type="button"
                   className="secondary-button cancel-action"
@@ -4859,6 +5109,8 @@ function App() {
   }
 
   function renderDebtsView() {
+    const debtActionKey = debtForm.id ? 'deudas:guardar' : 'deudas:crear'
+    const isDebtBusy = Boolean(actionLoading[debtActionKey])
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
@@ -4901,10 +5153,12 @@ function App() {
                   <label>
                     Total de la deuda
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={debtForm.totalAmount}
                       onChange={(event) =>
-                        setDebtForm((current) => ({ ...current, totalAmount: event.target.value }))
+                        setDebtForm((current) => ({ ...current, totalAmount: keepOnlyDigits(event.target.value) }))
                       }
                       placeholder="2400000"
                     />
@@ -4912,10 +5166,12 @@ function App() {
                   <label>
                     Cuota por pago
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={debtForm.installmentAmount}
                       onChange={(event) =>
-                        setDebtForm((current) => ({ ...current, installmentAmount: event.target.value }))
+                        setDebtForm((current) => ({ ...current, installmentAmount: keepOnlyDigits(event.target.value) }))
                       }
                       placeholder="400000"
                     />
@@ -4925,11 +5181,14 @@ function App() {
                   <label>
                     Dia de pago
                     <input
-                      type="number"
-                      min="1"
-                      max="31"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={2}
                       value={debtForm.dueDay}
-                      onChange={(event) => setDebtForm((current) => ({ ...current, dueDay: event.target.value }))}
+                      onChange={(event) =>
+                        setDebtForm((current) => ({ ...current, dueDay: keepOnlyDigits(event.target.value).slice(0, 2) }))
+                      }
                     />
                   </label>
                   <label>
@@ -4963,7 +5222,15 @@ function App() {
                     </select>
                   </label>
                 </div>
-                <button type="submit">{debtForm.id ? 'Guardar deuda' : 'Crear deuda'}</button>
+	                <button type="submit" disabled={isDebtBusy}>
+	                  {isDebtBusy
+	                    ? debtForm.id
+	                      ? 'Guardando...'
+	                      : 'Creando...'
+	                    : debtForm.id
+	                      ? 'Guardar deuda'
+	                      : 'Crear deuda'}
+	                </button>
                 {debtForm.id && (
                   <button
                     type="button"
@@ -5064,16 +5331,14 @@ function App() {
                         <label>
                           Valor a registrar
                           <input
-                            type="number"
+                            type="text"
                             inputMode="numeric"
                             pattern="[0-9]*"
-                            min={0}
-                            step={1}
                             value={debtPaymentDrafts[debt.id] ?? String(debt.installmentAmount)}
                             onChange={(event) =>
                               setDebtPaymentDrafts((current) => ({
                                 ...current,
-                                [debt.id]: event.target.value,
+                                [debt.id]: keepOnlyDigits(event.target.value),
                               }))
                             }
                             placeholder={String(debt.installmentAmount)}
@@ -5082,17 +5347,23 @@ function App() {
                         <p className="debt-entry-help">
                           Cuota sugerida: {money.format(debt.installmentAmount)}. Puedes registrar un valor menor o un abono extraordinario.
                         </p>
-                        <div className="debt-entry-actions">
-                          <button type="button" className="action-trigger debt-submit" onClick={() => handlePayDebt(debt.id, 'scheduled')}>
-                            Registrar cuota
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button slim debt-secondary-action"
-                            onClick={() => handlePayDebt(debt.id, 'extra')}
-                          >
-                            Registrar abono extra
-                          </button>
+	                        <div className="debt-entry-actions">
+	                          <button
+	                            type="button"
+	                            className="action-trigger debt-submit"
+	                            disabled={Boolean(actionLoading[`deudas:pagar:${debt.id}`])}
+	                            onClick={() => handlePayDebt(debt.id, 'scheduled')}
+	                          >
+	                            {actionLoading[`deudas:pagar:${debt.id}`] ? 'Registrando...' : 'Registrar cuota'}
+	                          </button>
+	                          <button
+	                            type="button"
+	                            className="secondary-button slim debt-secondary-action"
+	                            disabled={Boolean(actionLoading[`deudas:pagar:${debt.id}`])}
+	                            onClick={() => handlePayDebt(debt.id, 'extra')}
+	                          >
+	                            {actionLoading[`deudas:pagar:${debt.id}`] ? 'Registrando...' : 'Registrar abono extra'}
+	                          </button>
                           <button
                             type="button"
                             className="secondary-button slim debt-cancel-action"
@@ -5244,12 +5515,25 @@ function App() {
 	                : 'Supabase aun no esta configurado. La app opera en modo local.'
 	            }
 	            actions={
-	              supabaseConfigured ? (
-	                <button type="button" className="text-link" onClick={() => void syncNow()}>
-	                  Forzar sincronizacion
-	                </button>
-	              ) : null
-	            }
+		              supabaseConfigured ? (
+		                <button
+		                  type="button"
+		                  className="text-link"
+		                  disabled={Boolean(actionLoading['sync:now'])}
+		                  onClick={async () => {
+		                    const actionKey = 'sync:now'
+		                    if (!beginAction(actionKey)) return
+		                    try {
+		                      await syncNow()
+		                    } finally {
+		                      endAction(actionKey, 650)
+		                    }
+		                  }}
+		                >
+		                  {actionLoading['sync:now'] ? 'Sincronizando...' : 'Forzar sincronizacion'}
+		                </button>
+		              ) : null
+		            }
 	            collapsed={isSectionCollapsed('config-sync')}
 	            onToggle={() => toggleSection('config-sync')}
 	            emphasis
@@ -5289,8 +5573,13 @@ function App() {
                 <div key={category} className="settings-chip">
                   <span>{category}</span>
                   {category !== 'Otros' && (
-                    <button type="button" className="text-link compact" onClick={() => handleRemoveCategory(category)}>
-                      Quitar
+                    <button
+                      type="button"
+                      className="text-link compact"
+                      disabled={Boolean(actionLoading[`categorias:eliminar:${category}`])}
+                      onClick={() => handleRemoveCategory(category)}
+                    >
+                      {actionLoading[`categorias:eliminar:${category}`] ? 'Quitando...' : 'Quitar'}
                     </button>
                   )}
                 </div>
@@ -5313,9 +5602,10 @@ function App() {
                   <button
                     type="button"
                     className="text-link compact"
+                    disabled={Boolean(actionLoading[`reglas:eliminar:${rule.keyword}`])}
                     onClick={() => handleRemoveLearningRule(rule.keyword)}
                   >
-                    Quitar
+                    {actionLoading[`reglas:eliminar:${rule.keyword}`] ? 'Quitando...' : 'Quitar'}
                   </button>
                 </div>
               ))}

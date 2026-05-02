@@ -395,6 +395,34 @@ body {
   margin-top: 8px;
 }
 
+.summary-month-selector {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.summary-month-selector span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.summary-month-selector input {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f172a;
+  font-weight: 800;
+}
+
 .portfolio-metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 28px;
@@ -4924,6 +4952,13 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.movement-opening-row {
+  border-color: rgba(20, 184, 166, 0.26);
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.11), rgba(59, 130, 246, 0.06)),
+    var(--bg-card);
+}
+
 .simple-movement-top,
 .simple-movement-meta {
   display: grid;
@@ -5278,11 +5313,12 @@ body {
     justify-self: start;
   }
 
-  .movement-summary-grid-compact,
-  .movement-summary-grid-premium {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
+	  .movement-summary-grid-compact,
+	  .movement-summary-grid-premium {
+	    grid-template-columns: repeat(2, minmax(0, 1fr));
+	  }
+
+	}
 
 /* Dark theme restore */
 
