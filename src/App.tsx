@@ -929,7 +929,7 @@ function App() {
     return Object.entries(grouped).sort((a, b) => b[1] - a[1]).slice(0, 4)
   }, [monthExpenses])
 
-	  const activity = useMemo(() => {
+		  const activity = useMemo(() => {
 	    const items = [
 	      ...monthExpenses.map((expense) => ({
 	        id: expense.id,
@@ -992,8 +992,99 @@ function App() {
 	      const bKey = `${b.date}T${normalizeTimeHHmm(b.time)}`
 	      if (aKey === bKey) return 0
 	      return aKey < bKey ? 1 : -1
+		    })
+		  }, [monthExpenses, monthIncomes, monthTransfers, state.pockets])
+
+	  const pocketActivityById = useMemo(() => {
+	    type PocketActivityItem = {
+	      id: string
+	      date: string
+	      time?: string
+	      kind: 'gasto' | 'ingreso' | 'transferencia'
+	      title: string
+	      amount: number
+	      meta: string
+	    }
+
+	    const grouped = state.pockets.reduce<Record<string, PocketActivityItem[]>>((acc, pocket) => {
+	      acc[pocket.id] = []
+	      return acc
+	    }, {})
+
+	    const addPocketActivity = (pocketId: string, item: PocketActivityItem) => {
+	      if (!grouped[pocketId]) grouped[pocketId] = []
+	      grouped[pocketId].push(item)
+	    }
+
+	    state.incomes.forEach((income) => {
+	      addPocketActivity(income.pocketId, {
+	        id: `income-${income.id}`,
+	        date: income.date,
+	        time: income.time,
+	        kind: 'ingreso',
+	        title: income.title,
+	        amount: income.amount,
+	        meta: income.recurring ? 'Ingreso recurrente' : 'Ingreso manual',
+	      })
 	    })
-	  }, [monthExpenses, monthIncomes, monthTransfers, state.pockets])
+
+	    state.expenses.forEach((expense) => {
+	      addPocketActivity(expense.pocketId, {
+	        id: `expense-${expense.id}`,
+	        date: expense.date,
+	        time: expense.time,
+	        kind: 'gasto',
+	        title: expense.description,
+	        amount: -expense.amount,
+	        meta: `${expense.category} · ${expense.source}`,
+	      })
+	    })
+
+	    state.transfers.forEach((transfer) => {
+	      addPocketActivity(transfer.fromPocketId, {
+	        id: `transfer-out-${transfer.id}`,
+	        date: transfer.date,
+	        time: transfer.time,
+	        kind: 'transferencia',
+	        title: transfer.note || 'Transferencia interna',
+	        amount: -transfer.amount,
+	        meta: `Salida hacia ${getPocketName(state.pockets, transfer.toPocketId)}`,
+	      })
+
+	      addPocketActivity(transfer.toPocketId, {
+	        id: `transfer-in-${transfer.id}`,
+	        date: transfer.date,
+	        time: transfer.time,
+	        kind: 'transferencia',
+	        title: transfer.note || 'Transferencia interna',
+	        amount: transfer.amount,
+	        meta: `Entrada desde ${getPocketName(state.pockets, transfer.fromPocketId)}`,
+	      })
+	    })
+
+	    Object.values(grouped).forEach((items) => {
+	      items.sort((a, b) => {
+	        const aKey = `${a.date}T${normalizeTimeHHmm(a.time)}`
+	        const bKey = `${b.date}T${normalizeTimeHHmm(b.time)}`
+	        if (aKey === bKey) return 0
+	        return aKey < bKey ? 1 : -1
+	      })
+	    })
+
+	    return grouped
+	  }, [state.expenses, state.incomes, state.pockets, state.transfers])
+
+	  const pocketMovementTotalsById = useMemo(() => {
+	    return state.pockets.reduce<Record<string, { inflow: number; outflow: number; count: number }>>((acc, pocket) => {
+	      const items = pocketActivityById[pocket.id] ?? []
+	      acc[pocket.id] = {
+	        inflow: items.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0),
+	        outflow: items.filter((item) => item.amount < 0).reduce((sum, item) => sum + Math.abs(item.amount), 0),
+	        count: items.length,
+	      }
+	      return acc
+	    }, {})
+	  }, [pocketActivityById, state.pockets])
 
 	  const movementActivity = useMemo(() => {
 	    const items = [
@@ -1548,6 +1639,7 @@ function App() {
     const pocket = state.pockets.find((item) => item.id === pocketId)
     if (!pocket) return
     setSelectedPocketId(pocketId)
+    setOpenPocketDetailId(null)
     setActiveModule('bolsillos')
     setOpenComposer('bolsillos')
     setPocketForm({
@@ -3721,9 +3813,7 @@ function App() {
   }
 
 	  function renderPocketsView() {
-	    const pocketActionKey = pocketForm.id ? 'bolsillos:guardar' : 'bolsillos:crear'
-	    const isPocketBusy = Boolean(actionLoading[pocketActionKey])
-	    if (!selectedPocket) {
+		    if (!selectedPocket) {
 	      return (
         <section className="dashboard-grid">
           <div className="primary-column">
@@ -3786,195 +3876,21 @@ function App() {
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
-          {openPocketDetailId && (
-            <FullscreenComposer
-              isOpen={Boolean(openPocketDetailId)}
-              label="Bolsillo"
-              title={state.pockets.find((pocket) => pocket.id === openPocketDetailId)?.name ?? 'Detalle'}
-              description="Detalle del bolsillo seleccionado."
-              onClose={() => setOpenPocketDetailId(null)}
-            >
-              {(() => {
-                const pocket = state.pockets.find((item) => item.id === openPocketDetailId)
-                if (!pocket) return null
-
-                const pocketActivity = activity.filter((item) => item.pocketIds.includes(pocket.id)).slice(0, 8)
-
-                return (
-                  <section className="pocket-detail-modal">
-                    <div className="pocket-summary-grid">
-                      <div className="summary-box">
-                        <span>Saldo actual</span>
-                        <strong>{money.format(pocketBalances[pocket.id] ?? 0)}</strong>
-                      </div>
-                      <div className="summary-box">
-                        <span>Tipo</span>
-                        <strong>{getPocketTypeLabel(pocket.type)}</strong>
-                      </div>
-                      <div className="summary-box accent">
-                        <span>Identidad</span>
-                        <strong>
-                          <span className="icon-badge inline" style={{ background: pocket.color }}>
-                            {pocket.icon}
-                          </span>
-                          {pocket.name}
-                        </strong>
-                      </div>
-                    </div>
-                    <div className="composer-action-row">
-                      <button
-                        type="button"
-                        className="action-trigger"
-                        onClick={() => {
-                          setOpenPocketDetailId(null)
-                          startEditPocket(pocket.id)
-                        }}
-                      >
-                        Editar bolsillo
-                      </button>
-                    </div>
-                    <div className="ledger">
-                      {pocketActivity.map((item) => (
-                        <article key={item.kind + item.id} className="ledger-row">
-                          <div className={`ledger-icon ${item.kind}`}></div>
-                          <div className="ledger-copy">
-                            <strong>{item.title}</strong>
-                            <p>{item.date}</p>
-                          </div>
-                          <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
-                            {item.amount >= 0 ? '+' : '-'}
-                            {money.format(Math.abs(item.amount))}
-                          </strong>
-                        </article>
-                      ))}
-                      {pocketActivity.length === 0 && <p className="empty-copy">Este bolsillo no tiene movimientos recientes.</p>}
-                    </div>
-                  </section>
-                )
-              })()}
-            </FullscreenComposer>
-          )}
-
           {openComposer === 'bolsillos' && (
-            <section className="panel banking-panel action-panel">
-              <div className="composer-toolbar">
-                <div>
-                  <span className="micro-label">Accion</span>
-                  <h2>{pocketForm.id ? 'Editar bolsillo' : 'Registrar bolsillo'}</h2>
-                  <p>Configura nombre, tipo, color e icono para tu nuevo bolsillo.</p>
-                </div>
-                <button
-                  type="button"
-                  className="secondary-button cancel-action"
-                  onClick={() => {
-                    resetPocketForm()
-                    setOpenComposer(null)
-                  }}
-                >
-                  Cerrar
-                </button>
-              </div>
-              <form className="bank-form" onSubmit={handleAddPocket}>
-                <label>
-                  Nombre del bolsillo
-                  <input
-                    value={pocketForm.name}
-                    onChange={(event) =>
-                      setPocketForm((current) => ({ ...current, name: event.target.value }))
-                    }
-                    placeholder="Ej. emergencia, viajes, impuestos"
-                  />
-                </label>
-                <div className="form-grid three">
-                  <label>
-                    Tipo
-                    <select
-                      value={pocketForm.type}
-                      onChange={(event) =>
-                        setPocketForm((current) => ({
-                          ...current,
-                          type: event.target.value as PocketType,
-                          icon:
-                            current.icon === getDefaultIcon(current.type)
-                              ? getDefaultIcon(event.target.value as PocketType)
-                              : current.icon,
-                        }))
-                      }
-                    >
-                      <option value="daily">Operacion</option>
-                      <option value="savings">Ahorro</option>
-                      <option value="fixed">Pagos fijos</option>
-                      <option value="invest">Meta o inversion</option>
-                    </select>
-                  </label>
-                  <label>
-                    Color
-                    <input
-                      type="color"
-                      value={pocketForm.color}
-                      onChange={(event) =>
-                        setPocketForm((current) => ({ ...current, color: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Icono
-                    <select
-                      value={pocketForm.icon}
-                      onChange={(event) =>
-                        setPocketForm((current) => ({ ...current, icon: event.target.value }))
-                      }
-                    >
-                      {pocketIcons.map((icon) => (
-                        <option key={icon} value={icon}>
-                          {icon}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="pocket-preview">
-                  <span className="icon-badge large" style={{ background: pocketForm.color }}>
-                    {pocketForm.icon}
-                  </span>
-                  <div>
-                    <strong>{pocketForm.name || 'Nuevo bolsillo'}</strong>
-                    <p>Saldo inicial {money.format(0)}</p>
-                  </div>
-                </div>
-	                <button type="submit" disabled={isPocketBusy}>
-	                  {isPocketBusy
-	                    ? pocketForm.id
-	                      ? 'Guardando...'
-	                      : 'Creando...'
-	                    : pocketForm.id
-	                      ? 'Guardar cambios'
-	                      : 'Crear bolsillo'}
-	                </button>
-                {pocketForm.id && (
-                  <div className="composer-action-row">
-	                    <button
-	                      type="button"
-	                      className="secondary-button delete-action"
-	                      disabled={Boolean(actionLoading[`bolsillos:eliminar:${pocketForm.id}`])}
-	                      onClick={() => handleDeletePocket(pocketForm.id)}
-	                    >
-	                      {actionLoading[`bolsillos:eliminar:${pocketForm.id}`] ? 'Eliminando...' : 'Eliminar bolsillo'}
-	                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button cancel-action"
-                      onClick={() => {
-                        resetPocketForm()
-                        setOpenComposer(null)
-                      }}
-                    >
-                      Cancelar edicion
-                    </button>
-                  </div>
-                )}
-              </form>
-            </section>
+            <FullscreenComposer
+              isOpen={openComposer === 'bolsillos'}
+              label="Bolsillo"
+              title={pocketForm.id ? 'Editar bolsillo' : 'Registrar bolsillo'}
+              description="Configura nombre, tipo, color e icono del bolsillo."
+              toolbarClassName="no-sticky"
+              bodyClassName="scroll-on-panel"
+              onClose={() => {
+                resetPocketForm()
+                setOpenComposer(null)
+              }}
+            >
+              {renderActiveForm()}
+            </FullscreenComposer>
           )}
 
           <SectionFrame
@@ -3996,15 +3912,21 @@ function App() {
             }
           >
             <div className="account-strip two-cols">
-              {state.pockets.map((pocket) => (
-                <article
-                  key={pocket.id}
-                  className={pocket.id === selectedPocketId ? 'account-card selected' : 'account-card'}
-                  onClick={() => {
-                    setSelectedPocketId(pocket.id)
-                    setOpenPocketDetailId(pocket.id)
-                  }}
-                >
+	              {state.pockets.map((pocket) => (
+	                <article
+	                  key={pocket.id}
+	                  className={[
+	                    'account-card',
+	                    pocket.id === selectedPocketId ? 'selected' : null,
+	                    openPocketDetailId === pocket.id ? 'expanded' : null,
+	                  ]
+	                    .filter(Boolean)
+	                    .join(' ')}
+	                  onClick={() => {
+	                    setSelectedPocketId(pocket.id)
+	                    setOpenPocketDetailId((current) => (current === pocket.id ? null : pocket.id))
+	                  }}
+	                >
                   <div className="account-card-top">
                     <div className="card-heading-inline">
                       <span className="icon-badge" style={{ background: pocket.color }}>
@@ -4023,11 +3945,63 @@ function App() {
                     >
                       <LuPencil />
                     </button>
-                  </div>
-                  <strong>{pocket.name}</strong>
-                  <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
-                </article>
-              ))}
+	                  </div>
+	                  <strong>{pocket.name}</strong>
+	                  <p>{money.format(pocketBalances[pocket.id] ?? 0)}</p>
+	                  {openPocketDetailId === pocket.id &&
+	                    (() => {
+	                      const pocketActivity = pocketActivityById[pocket.id] ?? []
+	                      const pocketTotals = pocketMovementTotalsById[pocket.id] ?? {
+	                        inflow: 0,
+	                        outflow: 0,
+	                        count: 0,
+	                      }
+	                      const recentActivity = pocketActivity.slice(0, 6)
+
+	                      return (
+	                        <section className="pocket-inline-detail" onClick={(event) => event.stopPropagation()}>
+	                          <div className="pocket-inline-metrics">
+	                            <div>
+	                              <span>Entradas acumuladas</span>
+	                              <strong className="value-positive">{money.format(pocketTotals.inflow)}</strong>
+	                            </div>
+	                            <div>
+	                              <span>Salidas acumuladas</span>
+	                              <strong className="value-negative">{money.format(pocketTotals.outflow)}</strong>
+	                            </div>
+	                            <div>
+	                              <span>Movimientos</span>
+	                              <strong>{pocketTotals.count}</strong>
+	                            </div>
+	                          </div>
+	                          <div className="pocket-inline-head">
+	                            <span>Movimiento acumulado</span>
+	                            <button type="button" className="text-link" onClick={() => startEditPocket(pocket.id)}>
+	                              Editar
+	                            </button>
+	                          </div>
+	                          <div className="pocket-inline-ledger">
+	                            {recentActivity.map((item) => (
+	                              <article key={item.id} className={`pocket-inline-row ${item.kind}`}>
+	                                <div>
+	                                  <strong>{item.title}</strong>
+	                                  <p>{formatMovementDateTimeDisplay(item.date, item.time)} · {item.meta}</p>
+	                                </div>
+	                                <strong className={item.amount >= 0 ? 'value-positive' : 'value-negative'}>
+	                                  {item.amount >= 0 ? '+' : '-'}
+	                                  {money.format(Math.abs(item.amount))}
+	                                </strong>
+	                              </article>
+	                            ))}
+	                            {recentActivity.length === 0 && (
+	                              <p className="empty-copy">Este bolsillo todavia no tiene movimientos registrados.</p>
+	                            )}
+	                          </div>
+	                        </section>
+	                      )
+	                    })()}
+	                </article>
+	              ))}
             </div>
           </SectionFrame>
         </div>
