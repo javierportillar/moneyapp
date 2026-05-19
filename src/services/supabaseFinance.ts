@@ -10,6 +10,7 @@ import type {
   MonthClosure,
   Pocket,
   PocketType,
+  Provision,
   Transfer,
 } from '../domain/finance/types'
 import type { PersistedEnvelope, RemoteSnapshotDriver } from './persistence'
@@ -29,6 +30,7 @@ const TABLES = {
   obligationPayments: 'pagos_obligaciones',
   debtPayments: 'pagos_deudas',
   monthClosures: 'cierres_mensuales',
+  provisions: 'provisiones',
 } as const
 
 function toNumber(value: unknown) {
@@ -219,6 +221,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         transfersResult,
         debtPaymentsResult,
         monthClosuresResult,
+        provisionsResult,
       ] = await Promise.all([
         client.from(TABLES.settings).select('*').eq('usuario_id', usuarioId).maybeSingle(),
         client.from(TABLES.categories).select('*').eq('usuario_id', usuarioId).order('posicion', { ascending: true }),
@@ -235,6 +238,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         client.from(TABLES.transfers).select('*').eq('usuario_id', usuarioId).order('fecha', { ascending: false }),
         client.from(TABLES.debtPayments).select('*').eq('usuario_id', usuarioId).order('fecha_pago', { ascending: false }),
         client.from(TABLES.monthClosures).select('*').eq('usuario_id', usuarioId).order('mes', { ascending: false }),
+        client.from(TABLES.provisions).select('*').eq('usuario_id', usuarioId).order('created_at', { ascending: false }),
       ])
 
       const results = [
@@ -249,6 +253,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         transfersResult,
         debtPaymentsResult,
         monthClosuresResult,
+        provisionsResult,
       ]
 
       const failed = results.find((result) => result.error)
@@ -356,6 +361,14 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
 
       const categories = (categoriesResult.data ?? []).map((row: any) => row.nombre as Category)
 
+      const provisions: Provision[] = (provisionsResult.data ?? []).map((row: any) => ({
+        id: row.app_id,
+        name: row.nombre,
+        pocketId: pocketIdToAppId.get(row.bolsillo_id) ?? '',
+        monthlyAmount: toNumber(row.monto_mensual),
+        active: Boolean(row.activa),
+      }))
+
       const state: Partial<AppState> = {
         pockets,
         expenses,
@@ -367,6 +380,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         monthClosures,
         learningRules,
         categories,
+        provisions,
         config: settingsResult.data
           ? {
               pocketTypeLabels: {
@@ -390,6 +404,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         ...(obligationsResult.data ?? []).map((row: any) => row.updated_at ?? row.created_at ?? null),
         ...(debtsResult.data ?? []).map((row: any) => row.updated_at ?? row.created_at ?? null),
         ...(monthClosuresResult.data ?? []).map((row: any) => row.fecha_cierre ?? row.created_at ?? null),
+        ...(provisionsResult.data ?? []).map((row: any) => row.updated_at ?? row.created_at ?? null),
       ]
         .filter(Boolean)
         .sort()
@@ -417,6 +432,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         existingDebtPayments,
         existingObligationPayments,
         existingMonthClosures,
+        existingProvisions,
       ] = await Promise.all([
         fetchExistingCategories(usuarioId),
         fetchExistingAppIds(TABLES.pockets, usuarioId),
@@ -429,6 +445,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         fetchExistingAppIds(TABLES.debtPayments, usuarioId),
         fetchExistingAppIds(TABLES.obligationPayments, usuarioId),
         fetchExistingMonthClosures(usuarioId),
+        fetchExistingAppIds(TABLES.provisions, usuarioId),
       ])
 
       const categoryRows = state.categories.map((rawName, index) => {
@@ -663,6 +680,19 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         usuarioId,
         monthClosureRows.map((row) => row.mes),
       )
+      const provisionRows = (state.provisions ?? []).map((item) => ({
+        id: existingProvisions.get(item.id) ?? crypto.randomUUID(),
+        usuario_id: usuarioId,
+        app_id: item.id,
+        nombre: item.name,
+        bolsillo_id: pocketAppIdToId.get(item.pocketId) ?? null,
+        monto_mensual: item.monthlyAmount,
+        activa: item.active,
+        updated_at: envelope.updatedAt,
+      }))
+
+      await upsertRows(TABLES.provisions, provisionRows.filter((row) => row.bolsillo_id), 'usuario_id,app_id')
+      await deleteRowsByAppId(TABLES.provisions, usuarioId, provisionRows.map((row) => row.app_id))
       await deleteRowsByAppId(TABLES.categories, usuarioId, categoryRows.map((row) => row.app_id))
       await deleteRowsByAppId(TABLES.pockets, usuarioId, pocketRows.map((row) => row.app_id))
     },
