@@ -1,8 +1,8 @@
 export type PocketType = 'daily' | 'savings' | 'fixed' | 'invest'
-export type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion'
+export type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion' | 'provisiones' | 'analisis'
 export type ModuleKey = 'gasto' | 'ingreso' | 'transferencia' | 'fijos' | 'bolsillos'
 export type MovementKind = 'gasto' | 'ingreso' | 'transferencia'
-export type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas'
+export type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas' | 'provisiones'
 
 export type Pocket = {
   id: string
@@ -85,6 +85,14 @@ export type LearningRule = {
   hits: number
 }
 
+export type Provision = {
+  id: string
+  name: string
+  pocketId: string
+  monthlyAmount: number
+  active: boolean
+}
+
 export type MonthClosure = {
   monthKey: string
   closedAt: string
@@ -112,4 +120,5 @@ export type AppState = {
   learningRules: LearningRule[]
   categories: Category[]
   config: AppConfig
+  provisions: Provision[]
 }

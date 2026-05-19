@@ -11,10 +11,29 @@ import {
   LuMenu,
   LuPencil,
   LuPiggyBank,
+  LuChartLine,
   LuSettings2,
+  LuTarget,
+  LuTrash2,
   LuWallet,
   LuX,
 } from 'react-icons/lu'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import './App.css'
 import { FullscreenComposer } from './components/FullscreenComposer'
 import {
@@ -41,6 +60,7 @@ import type {
   MovementKind,
   Pocket,
   PocketType,
+  Provision,
   Transfer,
   ViewKey,
 } from './domain/finance/types'
@@ -245,6 +265,8 @@ function getViewIcon(view: ViewKey) {
   if (view === 'movimientos') return <LuArrowLeftRight />
   if (view === 'programacion') return <LuPiggyBank />
   if (view === 'deudas') return <LuCircleDollarSign />
+  if (view === 'provisiones') return <LuTarget />
+  if (view === 'analisis') return <LuChartLine />
   return <LuSettings2 />
 }
 
@@ -284,6 +306,7 @@ function hydrateState(raw: AppState) {
     transfers: raw.transfers ?? initialState.transfers,
     expenses: raw.expenses ?? initialState.expenses,
     learningRules: raw.learningRules ?? initialState.learningRules,
+    provisions: raw.provisions ?? initialState.provisions,
     fixedExpenses: (raw.fixedExpenses ?? initialState.fixedExpenses).map((item) => ({
       ...item,
       active: item.active ?? true,
@@ -317,6 +340,278 @@ function MetricLabel({ label, info }: { label: string; info?: string }) {
       {label}
       {info ? <InfoTip text={info} /> : null}
     </span>
+  )
+}
+
+const CHART_PALETTE = [
+  '#60a5fa', '#34d399', '#f59e0b', '#a78bfa', '#f472b6',
+  '#fb7185', '#22d3ee', '#facc15', '#4ade80', '#c084fc',
+  '#fb923c', '#38bdf8',
+]
+
+const formatChartMoney = (value: number) => {
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (Math.abs(value) >= 1_000) return `${Math.round(value / 1_000)}k`
+  return String(Math.round(value))
+}
+
+function ChartTooltip({ active, payload, label, formatValue }: any) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="recharts-tip">
+      {label && <strong className="recharts-tip-label">{label}</strong>}
+      {payload.map((entry: any) => (
+        <div key={entry.dataKey ?? entry.name} className="recharts-tip-row">
+          <i className="chart-dot" style={{ background: entry.color ?? entry.payload?.fill }} />
+          <span>{entry.name}</span>
+          <strong>{formatValue ? formatValue(entry.value) : entry.value}</strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function GroupedBarChart({
+  data,
+  formatValue,
+}: {
+  data: Array<{ label: string; income: number; expense: number }>
+  formatValue?: (value: number) => string
+}) {
+  if (!data.length) {
+    return <p className="empty-copy">Sin datos suficientes para graficar.</p>
+  }
+  return (
+    <div className="chart-shell chart-shell-bar">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
+          <defs>
+            <linearGradient id="chartIncomeGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity={0.95} />
+              <stop offset="100%" stopColor="#10b981" stopOpacity={0.8} />
+            </linearGradient>
+            <linearGradient id="chartExpenseGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#fb7185" stopOpacity={0.95} />
+              <stop offset="100%" stopColor="#e11d48" stopOpacity={0.8} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
+          <XAxis
+            dataKey="label"
+            stroke="rgba(226, 232, 240, 0.65)"
+            fontSize={11}
+            tickLine={false}
+            axisLine={false}
+            interval={0}
+          />
+          <YAxis
+            stroke="rgba(226, 232, 240, 0.65)"
+            fontSize={10}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={formatChartMoney}
+            width={50}
+          />
+          <Tooltip
+            content={<ChartTooltip formatValue={formatValue} />}
+            cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }}
+          />
+          <Legend
+            wrapperStyle={{ fontSize: 11, paddingTop: 6 }}
+            iconType="circle"
+            iconSize={8}
+            formatter={(value: string) => <span style={{ color: 'rgba(226, 232, 240, 0.85)' }}>{value}</span>}
+          />
+          <Bar dataKey="income" name="Ingresos" fill="url(#chartIncomeGradient)" radius={[5, 5, 0, 0]} maxBarSize={42} />
+          <Bar dataKey="expense" name="Gastos" fill="url(#chartExpenseGradient)" radius={[5, 5, 0, 0]} maxBarSize={42} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function DonutChart({
+  data,
+  formatValue,
+  centerLabel = 'Total',
+}: {
+  data: Array<{ label: string; value: number; color?: string }>
+  formatValue?: (value: number) => string
+  centerLabel?: string
+}) {
+  const filteredData = data.filter((item) => item.value > 0)
+  const total = filteredData.reduce((sum, item) => sum + item.value, 0)
+  if (total <= 0) {
+    return <p className="empty-copy">Sin datos para graficar.</p>
+  }
+  const chartData = filteredData.map((item, index) => ({
+    ...item,
+    name: item.label,
+    color: item.color ?? CHART_PALETTE[index % CHART_PALETTE.length],
+  }))
+
+  return (
+    <div className="donut-chart-shell">
+      <div className="donut-chart-wrap">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={chartData}
+              dataKey="value"
+              nameKey="name"
+              innerRadius="60%"
+              outerRadius="92%"
+              paddingAngle={2}
+              stroke="rgba(15, 23, 42, 0.6)"
+              strokeWidth={2}
+            >
+              {chartData.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
+              ))}
+            </Pie>
+            <Tooltip
+              content={<ChartTooltip formatValue={formatValue ?? ((v) => money.format(v))} />}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="donut-center">
+          <span>{centerLabel}</span>
+          <strong>{formatValue ? formatValue(total) : formatChartMoney(total)}</strong>
+        </div>
+      </div>
+      <div className="donut-legend">
+        {chartData.map((slice) => (
+          <div key={slice.name} className="donut-legend-item">
+            <i className="chart-dot" style={{ background: slice.color }} />
+            <span className="donut-legend-label">{slice.label}</span>
+            <strong className="donut-legend-value">{((slice.value / total) * 100).toFixed(0)}%</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LineAreaChart({
+  data,
+  formatValue,
+  showZeroLine = true,
+}: {
+  data: Array<{ label: string; value: number }>
+  formatValue?: (value: number) => string
+  showZeroLine?: boolean
+}) {
+  if (data.length < 2) {
+    return <p className="empty-copy">Necesitas al menos dos puntos para proyectar.</p>
+  }
+  const hasNegative = data.some((d) => d.value < 0)
+  return (
+    <div className="chart-shell chart-shell-area">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+          <defs>
+            <linearGradient id="lineAreaGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.7} />
+              <stop offset="100%" stopColor="#60a5fa" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
+          <XAxis
+            dataKey="label"
+            stroke="rgba(226, 232, 240, 0.65)"
+            fontSize={11}
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+            minTickGap={12}
+          />
+          <YAxis
+            stroke="rgba(226, 232, 240, 0.65)"
+            fontSize={10}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={formatChartMoney}
+            width={50}
+          />
+          <Tooltip
+            content={<ChartTooltip formatValue={formatValue ?? ((v) => money.format(v))} />}
+            cursor={{ stroke: 'rgba(96, 165, 250, 0.4)', strokeDasharray: '3 3' }}
+          />
+          {hasNegative && showZeroLine && (
+            <ReferenceLine y={0} stroke="rgba(251, 113, 133, 0.6)" strokeDasharray="3 3" />
+          )}
+          <Area
+            type="monotone"
+            dataKey="value"
+            name="Saldo"
+            stroke="#60a5fa"
+            strokeWidth={2.5}
+            fill="url(#lineAreaGradient)"
+            dot={{ r: 3, fill: '#67e8f9', stroke: '#0f172a', strokeWidth: 1 }}
+            activeDot={{ r: 5 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function HorizontalBarList({
+  data,
+  formatValue,
+}: {
+  data: Array<{ label: string; value: number; color?: string }>
+  formatValue: (value: number) => string
+}) {
+  if (!data.length) {
+    return <p className="empty-copy">Sin datos disponibles.</p>
+  }
+  const truncate = (text: string, max = 16) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
+  const chartData = data.map((item, index) => ({
+    ...item,
+    name: truncate(item.label),
+    fullName: item.label,
+    color: item.color ?? CHART_PALETTE[index % CHART_PALETTE.length],
+  }))
+  const dynamicHeight = Math.max(180, chartData.length * 44)
+  return (
+    <div className="chart-shell chart-shell-hbar" style={{ height: dynamicHeight }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 4, right: 12, left: 0, bottom: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" horizontal={false} />
+          <XAxis
+            type="number"
+            stroke="rgba(226, 232, 240, 0.65)"
+            fontSize={10}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={formatChartMoney}
+          />
+          <YAxis
+            type="category"
+            dataKey="name"
+            stroke="rgba(226, 232, 240, 0.85)"
+            fontSize={11}
+            tickLine={false}
+            axisLine={false}
+            width={110}
+          />
+          <Tooltip
+            content={<ChartTooltip formatValue={formatValue} />}
+            cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }}
+          />
+          <Bar dataKey="value" name="Total" radius={[0, 6, 6, 0]} maxBarSize={28}>
+            {chartData.map((entry) => (
+              <Cell key={entry.name} fill={entry.color} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -657,6 +952,16 @@ function App() {
   })
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
+  const [provisionForm, setProvisionForm] = useState({
+    id: '',
+    name: '',
+    pocketId: initialState.pockets[0].id,
+    monthlyAmount: '',
+    createNewPocket: false,
+    newPocketName: '',
+    newPocketColor: '#7c3aed',
+    newPocketIcon: '🎯',
+  })
 	  const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
 	  const expenseDateInputRef = useRef<HTMLInputElement | null>(null)
 	  const incomeDateInputRef = useRef<HTMLInputElement | null>(null)
@@ -687,7 +992,7 @@ function App() {
     typeuser: 'user' as 'admin' | 'user',
     editingUsername: '',
   })
-  const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'configuracion']
+  const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'provisiones', 'analisis', 'configuracion']
 
   useEffect(() => {
     setIsMobileMenuOpen(false)
@@ -812,6 +1117,160 @@ function App() {
       ),
     [activeDebts],
   )
+
+  const activeProvisions = useMemo(
+    () => state.provisions.filter((provision) => provision.active),
+    [state.provisions],
+  )
+
+  const totalMonthlyProvision = useMemo(
+    () => activeProvisions.reduce((sum, provision) => sum + provision.monthlyAmount, 0),
+    [activeProvisions],
+  )
+
+  const provisionProgress = useMemo(() => {
+    const progress: Record<string, number> = {}
+    for (const provision of activeProvisions) {
+      const fromIncomes = state.incomes
+        .filter((income) => income.pocketId === provision.pocketId && income.date.startsWith(currentMonthKey))
+        .reduce((sum, income) => sum + income.amount, 0)
+      const fromTransfers = state.transfers
+        .filter((transfer) => transfer.toPocketId === provision.pocketId && transfer.date.startsWith(currentMonthKey))
+        .reduce((sum, transfer) => sum + transfer.amount, 0)
+      progress[provision.id] = fromIncomes + fromTransfers
+    }
+    return progress
+  }, [activeProvisions, state.incomes, state.transfers, currentMonthKey])
+
+  // ─────────────── Cálculos para el módulo de Análisis ───────────────
+  const analysisMonths = useMemo(() => {
+    const months: string[] = []
+    for (let offset = -5; offset <= 0; offset++) {
+      months.push(getMonthKeyFromOffset(currentMonthKey, offset))
+    }
+    return months
+  }, [currentMonthKey])
+
+  const monthlyFlowSeries = useMemo(() => {
+    return analysisMonths.map((monthKey) => {
+      const income = state.incomes
+        .filter((item) => item.date.startsWith(monthKey))
+        .reduce((sum, item) => sum + item.amount, 0)
+      const expense = state.expenses
+        .filter((item) => item.date.startsWith(monthKey))
+        .reduce((sum, item) => sum + item.amount, 0)
+      return {
+        monthKey,
+        label: monthKey.slice(5),
+        income,
+        expense,
+        net: income - expense,
+      }
+    })
+  }, [analysisMonths, state.incomes, state.expenses])
+
+  const averagesLast6 = useMemo(() => {
+    const monthsWithIncome = monthlyFlowSeries.filter((m) => m.income > 0)
+    const monthsWithExpense = monthlyFlowSeries.filter((m) => m.expense > 0)
+    const totalIncome = monthsWithIncome.reduce((sum, m) => sum + m.income, 0)
+    const totalExpense = monthsWithExpense.reduce((sum, m) => sum + m.expense, 0)
+    const avgIncome = monthsWithIncome.length ? totalIncome / monthsWithIncome.length : 0
+    const avgExpense = monthsWithExpense.length ? totalExpense / monthsWithExpense.length : 0
+    const avgNet = avgIncome - avgExpense
+    const savingsRate = avgIncome > 0 ? avgNet / avgIncome : 0
+    return { avgIncome, avgExpense, avgNet, savingsRate }
+  }, [monthlyFlowSeries])
+
+  const expensesByCategory = useMemo(() => {
+    const buckets: Record<string, number> = {}
+    state.expenses
+      .filter((expense) => expense.date.startsWith(currentMonthKey))
+      .forEach((expense) => {
+        buckets[expense.category] = (buckets[expense.category] ?? 0) + expense.amount
+      })
+    return Object.entries(buckets)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+  }, [state.expenses, currentMonthKey])
+
+  const expensesByPocket = useMemo(() => {
+    const buckets: Record<string, number> = {}
+    state.expenses
+      .filter((expense) => expense.date.startsWith(currentMonthKey))
+      .forEach((expense) => {
+        buckets[expense.pocketId] = (buckets[expense.pocketId] ?? 0) + expense.amount
+      })
+    return Object.entries(buckets)
+      .map(([pocketId, value]) => {
+        const pocket = state.pockets.find((p) => p.id === pocketId)
+        return {
+          label: pocket ? `${pocket.icon} ${pocket.name}` : 'Sin bolsillo',
+          value,
+          subtitle: pocket?.name ?? undefined,
+        }
+      })
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6)
+  }, [state.expenses, state.pockets, currentMonthKey])
+
+  const debtAnalysis = useMemo(() => {
+    const totalDebt = activeDebts.reduce((sum, d) => sum + d.remainingAmount, 0)
+    const totalInstallment = activeDebts.reduce(
+      (sum, d) => sum + Math.min(d.installmentAmount, d.remainingAmount),
+      0,
+    )
+    const monthsToPayoff = totalInstallment > 0 ? Math.ceil(totalDebt / totalInstallment) : 0
+    const debtToIncomeRatio = averagesLast6.avgIncome > 0 ? totalDebt / averagesLast6.avgIncome : 0
+    const installmentToIncomeRatio =
+      averagesLast6.avgIncome > 0 ? totalInstallment / averagesLast6.avgIncome : 0
+    return {
+      totalDebt,
+      totalInstallment,
+      monthsToPayoff,
+      debtToIncomeRatio,
+      installmentToIncomeRatio,
+      activeCount: activeDebts.length,
+    }
+  }, [activeDebts, averagesLast6.avgIncome])
+
+  const savingsProjection = useMemo(() => {
+    const currentTotal = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const series: Array<{ label: string; value: number }> = []
+    let runningTotal = currentTotal
+    series.push({ label: 'Hoy', value: runningTotal })
+    for (let i = 1; i <= 6; i++) {
+      runningTotal += averagesLast6.avgNet
+      const futureKey = getMonthKeyFromOffset(currentMonthKey, i)
+      series.push({ label: futureKey.slice(5), value: runningTotal })
+    }
+    return { series, currentTotal, projected6Months: runningTotal }
+  }, [pocketBalances, averagesLast6.avgNet, currentMonthKey])
+
+  const historicalBalanceSeries = useMemo(() => {
+    let runningBalance = 0
+    return monthlyFlowSeries.map((month) => {
+      runningBalance += month.net
+      return { label: month.label, value: runningBalance }
+    })
+  }, [monthlyFlowSeries])
+
+  const topExpensesThisMonth = useMemo(() => {
+    return state.expenses
+      .filter((expense) => expense.date.startsWith(currentMonthKey))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+  }, [state.expenses, currentMonthKey])
+
+  const fixedCommitmentRatio = useMemo(() => {
+    const totalFixed = state.fixedExpenses
+      .filter((item) => item.active)
+      .reduce((sum, item) => sum + item.amount, 0)
+    const totalProvisions = totalMonthlyProvision
+    const totalDebtInstallments = debtAnalysis.totalInstallment
+    const totalCommitments = totalFixed + totalProvisions + totalDebtInstallments
+    const ratio = averagesLast6.avgIncome > 0 ? totalCommitments / averagesLast6.avgIncome : 0
+    return { totalFixed, totalProvisions, totalDebtInstallments, totalCommitments, ratio }
+  }, [state.fixedExpenses, totalMonthlyProvision, debtAnalysis.totalInstallment, averagesLast6.avgIncome])
 
   const pocketBalances = useMemo(() => {
     const balances = Object.fromEntries(state.pockets.map((pocket) => [pocket.id, 0]))
@@ -1620,6 +2079,35 @@ function App() {
     })
   }
 
+  function resetProvisionForm() {
+    setProvisionForm({
+      id: '',
+      name: '',
+      pocketId: state.pockets[0]?.id ?? initialState.pockets[0].id,
+      monthlyAmount: '',
+      createNewPocket: false,
+      newPocketName: '',
+      newPocketColor: '#7c3aed',
+      newPocketIcon: '🎯',
+    })
+  }
+
+  function startEditProvision(provisionId: string) {
+    const provision = state.provisions.find((item) => item.id === provisionId)
+    if (!provision) return
+    setOpenComposer('provisiones')
+    setProvisionForm({
+      id: provision.id,
+      name: provision.name,
+      pocketId: provision.pocketId,
+      monthlyAmount: String(provision.monthlyAmount),
+      createNewPocket: false,
+      newPocketName: '',
+      newPocketColor: '#7c3aed',
+      newPocketIcon: '🎯',
+    })
+  }
+
   function openFixedPaymentConfirmation(fixedId: string) {
     const fixed = state.fixedExpenses.find((item) => item.id === fixedId)
     if (!fixed) return
@@ -2222,6 +2710,96 @@ function App() {
       ...current,
       fixedExpenses: current.fixedExpenses.map((item) =>
         item.id === fixedId ? { ...item, active: !item.active } : item,
+      ),
+    }))
+  }
+
+  function handleAddProvision(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const monthlyAmount = Number(provisionForm.monthlyAmount)
+    if (!provisionForm.name.trim() || monthlyAmount <= 0) return
+
+    const actionKey = provisionForm.id ? 'provisiones:guardar' : 'provisiones:crear'
+    if (!beginAction(actionKey)) return
+    try {
+      setState((current) => {
+        let targetPocketId = provisionForm.pocketId
+
+        if (provisionForm.createNewPocket && provisionForm.newPocketName.trim()) {
+          const newPocket: Pocket = {
+            id: crypto.randomUUID(),
+            name: provisionForm.newPocketName.trim(),
+            balance: 0,
+            color: provisionForm.newPocketColor,
+            icon: provisionForm.newPocketIcon,
+            type: 'invest',
+          }
+          targetPocketId = newPocket.id
+          const nextProvision: Provision = {
+            id: provisionForm.id || crypto.randomUUID(),
+            name: provisionForm.name.trim(),
+            pocketId: targetPocketId,
+            monthlyAmount,
+            active: true,
+          }
+          return {
+            ...current,
+            pockets: [...current.pockets, newPocket],
+            provisions: provisionForm.id
+              ? current.provisions.map((item) => (item.id === provisionForm.id ? nextProvision : item))
+              : [nextProvision, ...current.provisions],
+          }
+        }
+
+        const nextProvision: Provision = {
+          id: provisionForm.id || crypto.randomUUID(),
+          name: provisionForm.name.trim(),
+          pocketId: targetPocketId,
+          monthlyAmount,
+          active: true,
+        }
+        return {
+          ...current,
+          provisions: provisionForm.id
+            ? current.provisions.map((item) => (item.id === provisionForm.id ? nextProvision : item))
+            : [nextProvision, ...current.provisions],
+        }
+      })
+
+      resetProvisionForm()
+      setOpenComposer(null)
+      showUiNotice(
+        provisionForm.id ? 'Provision actualizada' : 'Provision creada',
+        provisionForm.id
+          ? `Se actualizaron los datos de "${provisionForm.name.trim()}".`
+          : `"${provisionForm.name.trim()}" fue agregada a tus provisiones mensuales.`,
+      )
+    } finally {
+      endAction(actionKey)
+    }
+  }
+
+  function handleDeleteProvision(provisionId: string) {
+    const provision = state.provisions.find((item) => item.id === provisionId)
+    if (!provision) return
+    const actionKey = `provisiones:eliminar:${provisionId}`
+    if (!beginAction(actionKey)) return
+    try {
+      setState((current) => ({
+        ...current,
+        provisions: current.provisions.filter((item) => item.id !== provisionId),
+      }))
+      showUiNotice('Provision eliminada', `"${provision.name}" fue eliminada de tus provisiones.`)
+    } finally {
+      endAction(actionKey)
+    }
+  }
+
+  function handleToggleProvision(provisionId: string) {
+    setState((current) => ({
+      ...current,
+      provisions: current.provisions.map((item) =>
+        item.id === provisionId ? { ...item, active: !item.active } : item,
       ),
     }))
   }
@@ -5476,6 +6054,582 @@ function App() {
     )
   }
 
+  function renderProvisionesView() {
+    const isProvisionBusy = Boolean(actionLoading[provisionForm.id ? 'provisiones:guardar' : 'provisiones:crear'])
+    const inactiveProvisions = state.provisions.filter((p) => !p.active)
+
+    return (
+      <section className="dashboard-grid">
+        <div className="primary-column">
+          <div className="debt-register-cta">
+            <button
+              className="action-trigger ghost debt-register-trigger"
+              type="button"
+              onClick={() => {
+                resetProvisionForm()
+                setOpenComposer('provisiones')
+              }}
+            >
+              Nueva provision
+            </button>
+          </div>
+
+          {openComposer === 'provisiones' && (
+            <FullscreenComposer
+              isOpen={openComposer === 'provisiones'}
+              label="Provision mensual"
+              title={provisionForm.id ? 'Editar provision' : 'Nueva provision'}
+              description="Define cuanto quieres destinar mensualmente a un bolsillo especifico."
+              toolbarClassName="no-sticky"
+              bodyClassName="scroll-on-panel"
+              onClose={() => {
+                resetProvisionForm()
+                setOpenComposer(null)
+              }}
+            >
+              <form className="bank-form" onSubmit={handleAddProvision}>
+                <label>
+                  Nombre de la provision
+                  <input
+                    value={provisionForm.name}
+                    onChange={(event) => setProvisionForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Ej. Fondo viaje, Emergencias, Meta casa"
+                  />
+                </label>
+                <label>
+                  Monto mensual objetivo
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={provisionForm.monthlyAmount}
+                    onChange={(event) =>
+                      setProvisionForm((current) => ({ ...current, monthlyAmount: keepOnlyDigits(event.target.value) }))
+                    }
+                    placeholder="500000"
+                  />
+                </label>
+
+                <div className="provision-pocket-toggle">
+                  <label className="provision-toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={provisionForm.createNewPocket}
+                      onChange={(event) =>
+                        setProvisionForm((current) => ({ ...current, createNewPocket: event.target.checked }))
+                      }
+                    />
+                    Crear un nuevo bolsillo para esta provision
+                  </label>
+                </div>
+
+                {provisionForm.createNewPocket ? (
+                  <div className="form-grid two">
+                    <label>
+                      Nombre del bolsillo
+                      <input
+                        value={provisionForm.newPocketName}
+                        onChange={(event) =>
+                          setProvisionForm((current) => ({ ...current, newPocketName: event.target.value }))
+                        }
+                        placeholder="Ej. Meta viaje Europa"
+                      />
+                    </label>
+                    <label>
+                      Icono
+                      <select
+                        value={provisionForm.newPocketIcon}
+                        onChange={(event) =>
+                          setProvisionForm((current) => ({ ...current, newPocketIcon: event.target.value }))
+                        }
+                      >
+                        {pocketIcons.map((icon) => (
+                          <option key={icon} value={icon}>
+                            {icon}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Color
+                      <input
+                        type="color"
+                        value={provisionForm.newPocketColor}
+                        onChange={(event) =>
+                          setProvisionForm((current) => ({ ...current, newPocketColor: event.target.value }))
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <label>
+                    Bolsillo destino
+                    <select
+                      value={provisionForm.pocketId}
+                      onChange={(event) =>
+                        setProvisionForm((current) => ({ ...current, pocketId: event.target.value }))
+                      }
+                    >
+                      {state.pockets.map((pocket) => (
+                        <option key={pocket.id} value={pocket.id}>
+                          {pocket.icon} {pocket.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <button type="submit" disabled={isProvisionBusy}>
+                  {isProvisionBusy
+                    ? provisionForm.id ? 'Guardando...' : 'Creando...'
+                    : provisionForm.id ? 'Guardar provision' : 'Crear provision'}
+                </button>
+                {provisionForm.id && (
+                  <button
+                    type="button"
+                    className="secondary-button cancel-action"
+                    onClick={() => {
+                      resetProvisionForm()
+                      setOpenComposer(null)
+                    }}
+                  >
+                    Cancelar edicion
+                  </button>
+                )}
+              </form>
+            </FullscreenComposer>
+          )}
+
+          <SectionFrame
+            label="Compromisos mensuales"
+            title="Provisiones activas"
+            subtitle={`${activeProvisions.length} activa(s)`}
+            collapsed={isSectionCollapsed('provisiones-activas')}
+            onToggle={() => toggleSection('provisiones-activas')}
+          >
+            <div className="debt-stack">
+              {activeProvisions.map((provision) => {
+                const allocated = provisionProgress[provision.id] ?? 0
+                const progress = provision.monthlyAmount > 0
+                  ? Math.min(100, Math.round((allocated / provision.monthlyAmount) * 100))
+                  : 0
+                const pocket = state.pockets.find((p) => p.id === provision.pocketId)
+                const isComplete = allocated >= provision.monthlyAmount
+
+                return (
+                  <article key={provision.id} className="debt-card provision-card">
+                    <div className="debt-card-top">
+                      <div>
+                        <div className="card-title-row">
+                          <strong>
+                            {pocket?.icon && <span className="provision-pocket-icon">{pocket.icon}</span>}
+                            {provision.name}
+                          </strong>
+                          <div className="provision-card-actions">
+                            <button
+                              type="button"
+                              className="edit-icon-button"
+                              aria-label={`Editar provision ${provision.name}`}
+                              onClick={() => startEditProvision(provision.id)}
+                            >
+                              <LuPencil />
+                            </button>
+                            <button
+                              type="button"
+                              className="edit-icon-button"
+                              aria-label={`Eliminar provision ${provision.name}`}
+                              onClick={() => handleDeleteProvision(provision.id)}
+                            >
+                              <LuTrash2 />
+                            </button>
+                          </div>
+                        </div>
+                        <p>
+                          Bolsillo: {pocket?.name ?? 'Sin bolsillo'} · Meta {money.format(provision.monthlyAmount)}/mes
+                        </p>
+                      </div>
+                      <div className="debt-card-side">
+                        <span className={isComplete ? 'provision-amount-complete' : ''}>
+                          {money.format(allocated)}
+                        </span>
+                        <small>{isComplete ? 'Completado' : 'Acumulado'}</small>
+                      </div>
+                    </div>
+                    <div className="debt-progress">
+                      <div className="debt-progress-bar">
+                        <div
+                          className={isComplete ? 'provision-bar-complete' : ''}
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                      <p>
+                        {money.format(allocated)} de {money.format(provision.monthlyAmount)} ({progress}%)
+                      </p>
+                      {!isComplete && (
+                        <p className="movement-detail">
+                          Faltan {money.format(Math.max(0, provision.monthlyAmount - allocated))} para completar la meta
+                        </p>
+                      )}
+                    </div>
+                    <div className="debt-actions">
+                      <button
+                        type="button"
+                        className="secondary-button slim debt-cancel-action"
+                        onClick={() => handleToggleProvision(provision.id)}
+                      >
+                        Pausar
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+              {activeProvisions.length === 0 && (
+                <p className="empty-copy">
+                  No tienes provisiones activas. Crea una para empezar a rastrear tus metas mensuales.
+                </p>
+              )}
+            </div>
+          </SectionFrame>
+
+          {inactiveProvisions.length > 0 && (
+            <SectionFrame
+              label="Pausadas"
+              title="Provisiones pausadas"
+              subtitle={`${inactiveProvisions.length} pausada(s)`}
+              collapsed={isSectionCollapsed('provisiones-pausadas')}
+              onToggle={() => toggleSection('provisiones-pausadas')}
+            >
+              <div className="debt-stack">
+                {inactiveProvisions.map((provision) => {
+                  const pocket = state.pockets.find((p) => p.id === provision.pocketId)
+                  return (
+                    <article key={provision.id} className="debt-card provision-card paused">
+                      <div className="debt-card-top">
+                        <div>
+                          <div className="card-title-row">
+                            <strong>
+                              {pocket?.icon && <span className="provision-pocket-icon">{pocket.icon}</span>}
+                              {provision.name}
+                            </strong>
+                            <button
+                              type="button"
+                              className="edit-icon-button"
+                              aria-label={`Eliminar provision ${provision.name}`}
+                              onClick={() => handleDeleteProvision(provision.id)}
+                            >
+                              <LuTrash2 />
+                            </button>
+                          </div>
+                          <p>Bolsillo: {pocket?.name ?? 'Sin bolsillo'} · {money.format(provision.monthlyAmount)}/mes</p>
+                        </div>
+                        <div className="debt-card-side">
+                          <span>Pausada</span>
+                        </div>
+                      </div>
+                      <div className="debt-actions">
+                        <button
+                          type="button"
+                          className="action-trigger debt-trigger"
+                          onClick={() => handleToggleProvision(provision.id)}
+                        >
+                          Reactivar
+                        </button>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </SectionFrame>
+          )}
+        </div>
+
+        <aside className="secondary-column">
+          <section className="panel banking-panel emphasis">
+            <span className="micro-label">Resumen del mes</span>
+            <h2>Compromisos mensuales</h2>
+            <div className="status-grid">
+              <div>
+                <span>Meta total</span>
+                <strong>{money.format(totalMonthlyProvision)}</strong>
+              </div>
+              <div>
+                <span>Acumulado</span>
+                <strong>
+                  {money.format(
+                    activeProvisions.reduce((sum, p) => sum + (provisionProgress[p.id] ?? 0), 0),
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span>Activas</span>
+                <strong>{activeProvisions.length}</strong>
+              </div>
+              <div>
+                <span>Completadas</span>
+                <strong>
+                  {activeProvisions.filter((p) => (provisionProgress[p.id] ?? 0) >= p.monthlyAmount).length}
+                </strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel banking-panel">
+            <span className="micro-label">Pendientes del mes</span>
+            <h2>Por completar</h2>
+            <div className="review-list">
+              {activeProvisions
+                .filter((p) => (provisionProgress[p.id] ?? 0) < p.monthlyAmount)
+                .slice(0, 4)
+                .map((provision) => {
+                  const pocket = state.pockets.find((p) => p.id === provision.pocketId)
+                  const remaining = provision.monthlyAmount - (provisionProgress[provision.id] ?? 0)
+                  return (
+                    <div key={provision.id} className="review-chip">
+                      <span>{pocket?.icon} {provision.name}</span>
+                      <strong>{money.format(remaining)}</strong>
+                    </div>
+                  )
+                })}
+              {activeProvisions.filter((p) => (provisionProgress[p.id] ?? 0) < p.monthlyAmount).length === 0 && (
+                <p className="empty-copy">Todas las provisiones del mes estan completas.</p>
+              )}
+            </div>
+          </section>
+        </aside>
+      </section>
+    )
+  }
+
+  function renderAnalisisView() {
+    const healthLabel =
+      averagesLast6.savingsRate >= 0.2
+        ? { text: 'Excelente', tone: 'good' }
+        : averagesLast6.savingsRate >= 0.1
+          ? { text: 'Estable', tone: 'ok' }
+          : averagesLast6.savingsRate >= 0
+            ? { text: 'Atencion', tone: 'warn' }
+            : { text: 'En rojo', tone: 'bad' }
+
+    const debtRiskLabel =
+      debtAnalysis.installmentToIncomeRatio >= 0.4
+        ? { text: 'Alto', tone: 'bad' }
+        : debtAnalysis.installmentToIncomeRatio >= 0.25
+          ? { text: 'Moderado', tone: 'warn' }
+          : debtAnalysis.installmentToIncomeRatio > 0
+            ? { text: 'Saludable', tone: 'good' }
+            : { text: 'Sin deuda', tone: 'good' }
+
+    return (
+      <section className="dashboard-grid">
+        <div className="primary-column">
+          <SectionFrame
+            label="Vista 360"
+            title="Salud financiera"
+            subtitle="Promedios de los ultimos 6 meses comparados con tu compromiso mensual."
+            collapsed={isSectionCollapsed('analisis-salud')}
+            onToggle={() => toggleSection('analisis-salud')}
+            emphasis
+          >
+            <div className="analytics-metrics">
+              <div className="analytics-metric">
+                <span>Ingreso promedio</span>
+                <strong>{money.format(averagesLast6.avgIncome)}</strong>
+                <small>/mes</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Gasto promedio</span>
+                <strong>{money.format(averagesLast6.avgExpense)}</strong>
+                <small>/mes</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Ahorro promedio</span>
+                <strong className={averagesLast6.avgNet >= 0 ? 'positive' : 'negative'}>
+                  {money.format(averagesLast6.avgNet)}
+                </strong>
+                <small>{percent.format(averagesLast6.savingsRate)} de tasa</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Estado</span>
+                <strong className={`tag-${healthLabel.tone}`}>{healthLabel.text}</strong>
+                <small>Salud financiera</small>
+              </div>
+            </div>
+          </SectionFrame>
+
+          <SectionFrame
+            label="Flujo mensual"
+            title="Ingresos vs gastos"
+            subtitle="Comparativo de los ultimos 6 meses"
+            collapsed={isSectionCollapsed('analisis-flujo')}
+            onToggle={() => toggleSection('analisis-flujo')}
+          >
+            <GroupedBarChart data={monthlyFlowSeries} />
+          </SectionFrame>
+
+          <SectionFrame
+            label="Composicion del gasto"
+            title="Distribucion por categoria"
+            subtitle={`Mes actual · ${expensesByCategory.length} categoria(s) con gasto`}
+            collapsed={isSectionCollapsed('analisis-categorias')}
+            onToggle={() => toggleSection('analisis-categorias')}
+          >
+            <DonutChart
+              data={expensesByCategory.map((item) => ({ label: item.label, value: item.value }))}
+              formatValue={(value) => money.format(value)}
+            />
+          </SectionFrame>
+
+          <SectionFrame
+            label="Bolsillos mas usados"
+            title="Gasto por bolsillo"
+            subtitle="Top 6 bolsillos del mes"
+            collapsed={isSectionCollapsed('analisis-bolsillos')}
+            onToggle={() => toggleSection('analisis-bolsillos')}
+          >
+            <HorizontalBarList
+              data={expensesByPocket}
+              formatValue={(value) => money.format(value)}
+            />
+          </SectionFrame>
+
+          <SectionFrame
+            label="Trayectoria"
+            title="Evolucion del saldo neto"
+            subtitle="Suma acumulada del flujo (ingresos − gastos) por mes"
+            collapsed={isSectionCollapsed('analisis-trayectoria')}
+            onToggle={() => toggleSection('analisis-trayectoria')}
+          >
+            <LineAreaChart data={historicalBalanceSeries} />
+          </SectionFrame>
+
+          <SectionFrame
+            label="Proyeccion"
+            title="Saldo estimado a 6 meses"
+            subtitle="Asume que el ahorro promedio actual se mantiene constante"
+            collapsed={isSectionCollapsed('analisis-proyeccion')}
+            onToggle={() => toggleSection('analisis-proyeccion')}
+          >
+            <div className="projection-shell">
+              <LineAreaChart data={savingsProjection.series} />
+              <div className="projection-meta">
+                <div>
+                  <span>Saldo actual</span>
+                  <strong>{money.format(savingsProjection.currentTotal)}</strong>
+                </div>
+                <div>
+                  <span>Proyeccion en 6 meses</span>
+                  <strong className={savingsProjection.projected6Months >= savingsProjection.currentTotal ? 'positive' : 'negative'}>
+                    {money.format(savingsProjection.projected6Months)}
+                  </strong>
+                </div>
+                <div>
+                  <span>Diferencia esperada</span>
+                  <strong>
+                    {money.format(savingsProjection.projected6Months - savingsProjection.currentTotal)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </SectionFrame>
+        </div>
+
+        <aside className="secondary-column">
+          <SectionFrame
+            label="Analisis de deuda"
+            title="Capacidad vs compromiso"
+            subtitle="Cuanto pesa la deuda sobre tus ingresos"
+            collapsed={isSectionCollapsed('analisis-deuda')}
+            onToggle={() => toggleSection('analisis-deuda')}
+            emphasis
+          >
+            <div className="analytics-metrics compact">
+              <div className="analytics-metric">
+                <span>Deuda pendiente</span>
+                <strong>{money.format(debtAnalysis.totalDebt)}</strong>
+                <small>{debtAnalysis.activeCount} activa(s)</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Cuotas del mes</span>
+                <strong>{money.format(debtAnalysis.totalInstallment)}</strong>
+                <small>{percent.format(debtAnalysis.installmentToIncomeRatio)} del ingreso</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Tiempo de liquidacion</span>
+                <strong>{debtAnalysis.monthsToPayoff || '—'}</strong>
+                <small>{debtAnalysis.monthsToPayoff ? 'meses al ritmo actual' : 'Sin deuda activa'}</small>
+              </div>
+              <div className="analytics-metric">
+                <span>Riesgo</span>
+                <strong className={`tag-${debtRiskLabel.tone}`}>{debtRiskLabel.text}</strong>
+                <small>Deuda / ingreso</small>
+              </div>
+            </div>
+            <div className="ratio-bar">
+              <span className="ratio-bar-label">
+                Cuota/ingreso: {percent.format(debtAnalysis.installmentToIncomeRatio)}
+              </span>
+              <div className="ratio-bar-track">
+                <div
+                  className={`ratio-bar-fill tone-${debtRiskLabel.tone}`}
+                  style={{ width: `${Math.min(100, debtAnalysis.installmentToIncomeRatio * 100)}%` }}
+                />
+              </div>
+              <small>Recomendado: mantener bajo el 30%.</small>
+            </div>
+          </SectionFrame>
+
+          <SectionFrame
+            label="Compromisos mensuales"
+            title="Distribucion del ingreso"
+            subtitle="Cuanto se va en fijos, deudas y provisiones"
+            collapsed={isSectionCollapsed('analisis-compromisos')}
+            onToggle={() => toggleSection('analisis-compromisos')}
+          >
+            <DonutChart
+              data={[
+                { label: 'Obligaciones fijas', value: fixedCommitmentRatio.totalFixed, color: '#f59e0b' },
+                { label: 'Cuotas de deuda', value: fixedCommitmentRatio.totalDebtInstallments, color: '#fb7185' },
+                { label: 'Provisiones', value: fixedCommitmentRatio.totalProvisions, color: '#a78bfa' },
+                {
+                  label: 'Disponible',
+                  value: Math.max(0, averagesLast6.avgIncome - fixedCommitmentRatio.totalCommitments),
+                  color: '#34d399',
+                },
+              ]}
+              formatValue={(value) => money.format(value)}
+            />
+            <p className="analytics-footnote">
+              Tu compromiso total es {money.format(fixedCommitmentRatio.totalCommitments)} ({percent.format(fixedCommitmentRatio.ratio)} del ingreso promedio).
+            </p>
+          </SectionFrame>
+
+          <SectionFrame
+            label="Top gastos"
+            title="Mayores salidas del mes"
+            subtitle="Los 5 movimientos mas grandes"
+            collapsed={isSectionCollapsed('analisis-top-gastos')}
+            onToggle={() => toggleSection('analisis-top-gastos')}
+          >
+            <div className="review-list">
+              {topExpensesThisMonth.map((expense) => (
+                <div key={expense.id} className="review-chip">
+                  <span>
+                    {expense.description}
+                    <small className="chip-meta">{expense.category} · {expense.date.slice(8, 10)}/{expense.date.slice(5, 7)}</small>
+                  </span>
+                  <strong>{money.format(expense.amount)}</strong>
+                </div>
+              ))}
+              {topExpensesThisMonth.length === 0 && (
+                <p className="empty-copy">No hay gastos registrados este mes todavia.</p>
+              )}
+            </div>
+          </SectionFrame>
+        </aside>
+      </section>
+    )
+  }
+
   function renderSettingsView() {
     return (
       <section className="dashboard-grid">
@@ -6118,6 +7272,8 @@ function App() {
           {activeView === 'movimientos' && renderMovementsView()}
           {activeView === 'programacion' && renderProgrammingView()}
           {activeView === 'deudas' && renderDebtsView()}
+          {activeView === 'provisiones' && renderProvisionesView()}
+          {activeView === 'analisis' && renderAnalisisView()}
           {activeView === 'configuracion' && renderSettingsView()}
         </div>
       </section>
