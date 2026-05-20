@@ -1,8 +1,10 @@
 export type PocketType = 'daily' | 'savings' | 'fixed' | 'invest'
-export type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion' | 'provisiones' | 'analisis'
+export type ViewKey = 'resumen' | 'bolsillos' | 'movimientos' | 'programacion' | 'deudas' | 'configuracion' | 'provisiones' | 'analisis' | 'metas'
 export type ModuleKey = 'gasto' | 'ingreso' | 'transferencia' | 'fijos' | 'bolsillos'
 export type MovementKind = 'gasto' | 'ingreso' | 'transferencia'
-export type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas' | 'provisiones'
+export type ComposerView = 'movimientos' | 'bolsillos' | 'programacion' | 'deudas' | 'provisiones' | 'metas'
+
+export type GoalType = 'fixed-term' | 'indefinite'
 
 export type Pocket = {
   id: string
@@ -93,6 +95,21 @@ export type Provision = {
   active: boolean
 }
 
+export type Goal = {
+  id: string
+  name: string
+  type: GoalType
+  pocketId: string
+  targetAmount: number
+  targetDate?: string       // YYYY-MM-DD · solo cuando type === 'fixed-term'
+  startDate: string         // YYYY-MM-DD
+  icon: string
+  color: string
+  description?: string
+  active: boolean
+  completedAt?: string      // ISO timestamp cuando se completa
+}
+
 export type MonthClosure = {
   monthKey: string
   closedAt: string
@@ -121,4 +138,5 @@ export type AppState = {
   categories: Category[]
   config: AppConfig
   provisions: Provision[]
+  goals: Goal[]
 }

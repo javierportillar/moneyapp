@@ -50,6 +50,7 @@ export const initialState: AppState = {
   learningRules: [],
   categories: [...defaultCategories],
   provisions: [],
+  goals: [],
   config: {
     pocketTypeLabels: {
       daily: 'Operacion',
@@ -77,4 +78,5 @@ export const viewLabels: Record<ViewKey, string> = {
   configuracion: 'Configuracion',
   provisiones: 'Provisiones',
   analisis: 'Analisis',
+  metas: 'Metas',
 }

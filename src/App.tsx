@@ -7,6 +7,7 @@ import {
   LuCircleDollarSign,
   LuEye,
   LuEyeOff,
+  LuFlag,
   LuLayoutDashboard,
   LuMenu,
   LuPencil,
@@ -15,6 +16,7 @@ import {
   LuSettings2,
   LuTarget,
   LuTrash2,
+  LuTrophy,
   LuWallet,
   LuX,
 } from 'react-icons/lu'
@@ -54,6 +56,8 @@ import type {
   DebtPayment,
   Expense,
   FixedExpense,
+  Goal,
+  GoalType,
   Income,
   LearningRule,
   ModuleKey,
@@ -66,7 +70,7 @@ import type {
 } from './domain/finance/types'
 import { usePersistentSnapshot } from './hooks/usePersistentSnapshot'
 import { useSimpleUsersAuth } from './hooks/useSimpleUsersAuth'
-import { createSupabaseFinanceDriver } from './services/supabaseFinance'
+import { createSupabaseFinanceDriver, markEntityForRemoteDelete } from './services/supabaseFinance'
 import { getSupabaseClient } from './services/supabaseClient'
 
 const money = new Intl.NumberFormat('es-CO', {
@@ -267,6 +271,7 @@ function getViewIcon(view: ViewKey) {
   if (view === 'deudas') return <LuCircleDollarSign />
   if (view === 'provisiones') return <LuTarget />
   if (view === 'analisis') return <LuChartLine />
+  if (view === 'metas') return <LuFlag />
   return <LuSettings2 />
 }
 
@@ -307,6 +312,7 @@ function hydrateState(raw: AppState) {
     expenses: raw.expenses ?? initialState.expenses,
     learningRules: raw.learningRules ?? initialState.learningRules,
     provisions: raw.provisions ?? initialState.provisions,
+    goals: raw.goals ?? initialState.goals,
     fixedExpenses: (raw.fixedExpenses ?? initialState.fixedExpenses).map((item) => ({
       ...item,
       active: item.active ?? true,
@@ -556,6 +562,123 @@ function LineAreaChart({
   )
 }
 
+function ScenarioAreaChart({
+  data,
+}: {
+  data: Array<{ label: string; pesimista: number; realista: number; optimista: number }>
+}) {
+  if (data.length < 2) {
+    return <p className="empty-copy">Sin datos suficientes para proyectar escenarios.</p>
+  }
+  return (
+    <div className="chart-shell chart-shell-area">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+          <defs>
+            <linearGradient id="scenarioOpt" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity={0.45} />
+              <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="scenarioReal" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.55} />
+              <stop offset="100%" stopColor="#60a5fa" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="scenarioPes" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#fb7185" stopOpacity={0.4} />
+              <stop offset="100%" stopColor="#fb7185" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
+          <XAxis dataKey="label" stroke="rgba(226, 232, 240, 0.65)" fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis stroke="rgba(226, 232, 240, 0.65)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={formatChartMoney} width={50} />
+          <Tooltip content={<ChartTooltip formatValue={(v: number) => money.format(v)} />} cursor={{ stroke: 'rgba(96, 165, 250, 0.4)', strokeDasharray: '3 3' }} />
+          <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} iconType="circle" iconSize={8} formatter={(value: string) => <span style={{ color: 'rgba(226, 232, 240, 0.85)' }}>{value}</span>} />
+          <Area type="monotone" dataKey="optimista" name="Optimista" stroke="#34d399" strokeWidth={2} fill="url(#scenarioOpt)" />
+          <Area type="monotone" dataKey="realista" name="Realista" stroke="#60a5fa" strokeWidth={2.5} fill="url(#scenarioReal)" />
+          <Area type="monotone" dataKey="pesimista" name="Pesimista" stroke="#fb7185" strokeWidth={2} fill="url(#scenarioPes)" />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function WeekdayBarChart({
+  data,
+}: {
+  data: Array<{ label: string; fullLabel: string; value: number; count: number }>
+}) {
+  return (
+    <div className="chart-shell chart-shell-bar">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
+          <defs>
+            <linearGradient id="weekdayGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.95} />
+              <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.8} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
+          <XAxis dataKey="label" stroke="rgba(226, 232, 240, 0.65)" fontSize={11} tickLine={false} axisLine={false} interval={0} />
+          <YAxis stroke="rgba(226, 232, 240, 0.65)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={formatChartMoney} width={50} />
+          <Tooltip
+            content={(props: any) => {
+              if (!props.active || !props.payload?.length) return null
+              const d = props.payload[0].payload
+              return (
+                <div className="recharts-tip">
+                  <strong className="recharts-tip-label">{d.fullLabel}</strong>
+                  <div className="recharts-tip-row">
+                    <i className="chart-dot" style={{ background: '#a78bfa' }} />
+                    <span>Gasto promedio</span>
+                    <strong>{money.format(d.value)}</strong>
+                  </div>
+                  <div className="recharts-tip-row">
+                    <i className="chart-dot" style={{ background: '#94a3b8' }} />
+                    <span>Transacciones</span>
+                    <strong>{d.count}</strong>
+                  </div>
+                </div>
+              )
+            }}
+            cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }}
+          />
+          <Bar dataKey="value" name="Gasto promedio" fill="url(#weekdayGradient)" radius={[5, 5, 0, 0]} maxBarSize={42} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function SavingsRateChart({
+  data,
+}: {
+  data: Array<{ label: string; value: number }>
+}) {
+  if (data.length < 2) {
+    return <p className="empty-copy">Sin histórico suficiente.</p>
+  }
+  return (
+    <div className="chart-shell chart-shell-area">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+          <defs>
+            <linearGradient id="savingsRateGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity={0.6} />
+              <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
+          <XAxis dataKey="label" stroke="rgba(226, 232, 240, 0.65)" fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis stroke="rgba(226, 232, 240, 0.65)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}%`} width={50} />
+          <Tooltip content={<ChartTooltip formatValue={(v: number) => `${v}%`} />} cursor={{ stroke: 'rgba(96, 165, 250, 0.4)', strokeDasharray: '3 3' }} />
+          <ReferenceLine y={20} stroke="rgba(52, 211, 153, 0.5)" strokeDasharray="3 3" label={{ value: 'Meta 20%', fill: 'rgba(52, 211, 153, 0.85)', fontSize: 10, position: 'insideTopRight' }} />
+          <Area type="monotone" dataKey="value" name="Tasa de ahorro" stroke="#34d399" strokeWidth={2.5} fill="url(#savingsRateGradient)" dot={{ r: 3, fill: '#10b981', stroke: '#0f172a', strokeWidth: 1 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 function HorizontalBarList({
   data,
   formatValue,
@@ -730,12 +853,77 @@ function App() {
     supabaseConfigured,
     profileId,
     syncNow,
+    pullNow,
   } = usePersistentSnapshot<AppState>({
     storageKey: STORAGE_KEY,
     initialState,
     hydrate: hydrateState,
     remote: remoteDriver,
   })
+
+  // ─────────────── Supabase Realtime: sync instantáneo entre dispositivos ───────────────
+  useEffect(() => {
+    if (!auth.user?.id || !pullNow) return
+    const client = getSupabaseClient()
+    if (!client) return
+
+    const userId = auth.user.id
+    let debounceTimer: number | null = null
+
+    // Cuando llegan muchos cambios juntos (e.g. el usuario añade 3 cosas
+    // rápido en otro dispositivo), debouncamos para no recargar 3 veces.
+    const scheduleRefresh = () => {
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer)
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null
+        void pullNow()
+      }, 400)
+    }
+
+    const tablesToWatch = [
+      'bolsillos',
+      'gastos',
+      'ingresos',
+      'transferencias',
+      'obligaciones',
+      'deudas',
+      'pagos_obligaciones',
+      'pagos_deudas',
+      'cierres_mensuales',
+      'categorias',
+      'reglas_aprendizaje',
+      'provisiones',
+      'metas',
+      'configuracion',
+    ]
+
+    const channel = client.channel(`finpilot-realtime-${userId}`)
+
+    tablesToWatch.forEach((table) => {
+      channel.on(
+        // @ts-expect-error - tipo de postgres_changes no es exhaustivo
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table,
+          filter: `usuario_id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+    })
+
+    channel.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        // suscripción exitosa
+      }
+    })
+
+    return () => {
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer)
+      void client.removeChannel(channel)
+    }
+  }, [auth.user?.id, pullNow])
   const [activeView, setActiveView] = useState<ViewKey>('resumen')
   const [activeModule, setActiveModule] = useState<ModuleKey>('gasto')
   const [openComposer, setOpenComposer] = useState<ComposerView | null>(null)
@@ -962,6 +1150,19 @@ function App() {
     newPocketColor: '#7c3aed',
     newPocketIcon: '🎯',
   })
+  const [goalForm, setGoalForm] = useState({
+    id: '',
+    name: '',
+    type: 'fixed-term' as GoalType,
+    pocketId: initialState.pockets[0].id,
+    targetAmount: '',
+    targetDate: '',
+    icon: '🎯',
+    color: '#7c3aed',
+    description: '',
+    createNewPocket: false,
+    newPocketName: '',
+  })
 	  const [openMovementActionId, setOpenMovementActionId] = useState<string | null>(null)
 	  const expenseDateInputRef = useRef<HTMLInputElement | null>(null)
 	  const incomeDateInputRef = useRef<HTMLInputElement | null>(null)
@@ -992,7 +1193,7 @@ function App() {
     typeuser: 'user' as 'admin' | 'user',
     editingUsername: '',
   })
-  const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'provisiones', 'analisis', 'configuracion']
+  const orderedViews: ViewKey[] = ['resumen', 'movimientos', 'bolsillos', 'programacion', 'deudas', 'provisiones', 'metas', 'analisis', 'configuracion']
 
   useEffect(() => {
     setIsMobileMenuOpen(false)
@@ -1234,7 +1435,9 @@ function App() {
   }, [activeDebts, averagesLast6.avgIncome])
 
   const savingsProjection = useMemo(() => {
-    const currentTotal = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const totalIncomes = state.incomes.reduce((sum, item) => sum + item.amount, 0)
+    const totalExpenses = state.expenses.reduce((sum, item) => sum + item.amount, 0)
+    const currentTotal = totalIncomes - totalExpenses
     const series: Array<{ label: string; value: number }> = []
     let runningTotal = currentTotal
     series.push({ label: 'Hoy', value: runningTotal })
@@ -1244,7 +1447,7 @@ function App() {
       series.push({ label: futureKey.slice(5), value: runningTotal })
     }
     return { series, currentTotal, projected6Months: runningTotal }
-  }, [pocketBalances, averagesLast6.avgNet, currentMonthKey])
+  }, [state.incomes, state.expenses, averagesLast6.avgNet, currentMonthKey])
 
   const historicalBalanceSeries = useMemo(() => {
     let runningBalance = 0
@@ -1290,6 +1493,407 @@ function App() {
 
     return balances
   }, [state.expenses, state.incomes, state.pockets, state.transfers])
+
+  // ─────────────── Cálculos para módulo de Metas ───────────────
+  const goalProgressList = useMemo(() => {
+    const todayDate = new Date(`${today}T00:00:00`)
+    return state.goals.map((goal) => {
+      const currentAmount = Math.max(0, pocketBalances[goal.pocketId] ?? 0)
+      const progress = goal.targetAmount > 0 ? Math.min(1, currentAmount / goal.targetAmount) : 0
+      const remaining = Math.max(0, goal.targetAmount - currentAmount)
+      const isCompleted = currentAmount >= goal.targetAmount
+
+      // Días desde el inicio
+      const startDate = new Date(`${goal.startDate}T00:00:00`)
+      const daysSinceStart = Math.max(
+        1,
+        Math.floor((todayDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)),
+      )
+
+      // Ritmo de ahorro promedio diario (cuánto ha acumulado / días)
+      const dailyPace = currentAmount / daysSinceStart
+
+      let monthlyContributionNeeded = 0
+      let daysRemaining = 0
+      let estimatedCompletionDate: string | undefined
+      let isOnTrack = true
+
+      if (goal.type === 'fixed-term' && goal.targetDate) {
+        const targetDate = new Date(`${goal.targetDate}T00:00:00`)
+        daysRemaining = Math.max(
+          0,
+          Math.floor((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)),
+        )
+        const monthsRemaining = Math.max(1, daysRemaining / 30)
+        monthlyContributionNeeded = remaining / monthsRemaining
+
+        // ¿Vas bien?
+        const expectedAccumulated =
+          (goal.targetAmount * daysSinceStart) / (daysSinceStart + daysRemaining)
+        isOnTrack = currentAmount >= expectedAccumulated * 0.9
+      } else if (goal.type === 'indefinite' && dailyPace > 0) {
+        const daysToCompletion = remaining / dailyPace
+        const completionDate = new Date(todayDate.getTime() + daysToCompletion * 24 * 60 * 60 * 1000)
+        estimatedCompletionDate = formatDateISO(completionDate)
+      }
+
+      return {
+        goal,
+        currentAmount,
+        progress,
+        remaining,
+        isCompleted,
+        daysSinceStart,
+        daysRemaining,
+        monthlyContributionNeeded,
+        estimatedCompletionDate,
+        isOnTrack,
+        dailyPace,
+      }
+    })
+  }, [state.goals, pocketBalances, today])
+
+  const activeGoals = useMemo(() => goalProgressList.filter((g) => g.goal.active), [goalProgressList])
+  const completedGoals = useMemo(
+    () => goalProgressList.filter((g) => !g.goal.active || g.isCompleted),
+    [goalProgressList],
+  )
+
+  // ─────────────── Análisis avanzado: KPIs diarios, comparativos, patrones, alertas ───────────────
+  const currentMonthDate = new Date(`${currentMonthKey}-01T00:00:00`)
+  const daysInCurrentMonth = new Date(
+    currentMonthDate.getFullYear(),
+    currentMonthDate.getMonth() + 1,
+    0,
+  ).getDate()
+  const daysRemainingInMonth = Math.max(1, daysInCurrentMonth - currentDay + 1)
+
+  const currentMonthRealExpense = useMemo(
+    () =>
+      state.expenses
+        .filter((expense) => expense.date.startsWith(currentMonthKey))
+        .reduce((sum, item) => sum + item.amount, 0),
+    [state.expenses, currentMonthKey],
+  )
+
+  const currentMonthRealIncome = useMemo(
+    () =>
+      state.incomes
+        .filter((income) => income.date.startsWith(currentMonthKey))
+        .reduce((sum, item) => sum + item.amount, 0),
+    [state.incomes, currentMonthKey],
+  )
+
+  const previousMonthRealExpense = useMemo(() => {
+    const prev = getMonthKeyFromOffset(currentMonthKey, -1)
+    return state.expenses
+      .filter((expense) => expense.date.startsWith(prev))
+      .reduce((sum, item) => sum + item.amount, 0)
+  }, [state.expenses, currentMonthKey])
+
+  const previousMonthRealIncome = useMemo(() => {
+    const prev = getMonthKeyFromOffset(currentMonthKey, -1)
+    return state.incomes
+      .filter((income) => income.date.startsWith(prev))
+      .reduce((sum, item) => sum + item.amount, 0)
+  }, [state.incomes, currentMonthKey])
+
+  // KPI 1: Presupuesto disponible HOY
+  const dailyBudget = useMemo(() => {
+    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const unpaidFixed = state.fixedExpenses
+      .filter((item) => item.active && item.lastPaidMonth !== currentMonthKey)
+      .reduce((sum, item) => sum + item.amount, 0)
+    const remainingDebtInstallments = activeDebts.reduce(
+      (sum, debt) => sum + Math.min(debt.installmentAmount, debt.remainingAmount),
+      0,
+    )
+    const committed = unpaidFixed + remainingDebtInstallments
+    const available = Math.max(0, totalCash - committed)
+    return {
+      totalCash,
+      committed,
+      available,
+      perDay: Math.floor(available / daysRemainingInMonth),
+      daysRemaining: daysRemainingInMonth,
+    }
+  }, [pocketBalances, state.fixedExpenses, activeDebts, currentMonthKey, daysRemainingInMonth])
+
+  // KPI 2: Ritmo del mes
+  const monthPace = useMemo(() => {
+    const dayProgress = currentDay / daysInCurrentMonth
+    const expectedSpentByNow = averagesLast6.avgExpense * dayProgress
+    const paceRatio = expectedSpentByNow > 0 ? currentMonthRealExpense / expectedSpentByNow : 0
+    let status: 'good' | 'ok' | 'warn' | 'bad' = 'ok'
+    let label = 'En línea'
+    if (paceRatio < 0.85) {
+      status = 'good'
+      label = 'Ahorrando'
+    } else if (paceRatio <= 1.05) {
+      status = 'ok'
+      label = 'En línea'
+    } else if (paceRatio <= 1.2) {
+      status = 'warn'
+      label = 'Adelantado'
+    } else {
+      status = 'bad'
+      label = 'Gastando demasiado'
+    }
+    return {
+      dayProgress,
+      expectedSpentByNow,
+      actualSpent: currentMonthRealExpense,
+      paceRatio,
+      status,
+      label,
+    }
+  }, [currentDay, daysInCurrentMonth, averagesLast6.avgExpense, currentMonthRealExpense])
+
+  // KPI 3: Runway (meses que aguantas sin ingresar)
+  const financialRunway = useMemo(() => {
+    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const months = averagesLast6.avgExpense > 0 ? totalCash / averagesLast6.avgExpense : 0
+    let status: 'good' | 'ok' | 'warn' | 'bad' = 'ok'
+    if (months >= 6) status = 'good'
+    else if (months >= 3) status = 'ok'
+    else if (months >= 1) status = 'warn'
+    else status = 'bad'
+    return { totalCash, months, status }
+  }, [pocketBalances, averagesLast6.avgExpense])
+
+  // KPI 4: Cobertura fondo de emergencia
+  const emergencyFundCoverage = useMemo(() => {
+    const savingsBalance = state.pockets
+      .filter((pocket) => pocket.type === 'savings')
+      .reduce((sum, pocket) => sum + (pocketBalances[pocket.id] ?? 0), 0)
+    const months = averagesLast6.avgExpense > 0 ? savingsBalance / averagesLast6.avgExpense : 0
+    const target = averagesLast6.avgExpense * 3 // estándar mundial: 3 meses
+    const progressToTarget = target > 0 ? Math.min(1, savingsBalance / target) : 0
+    let status: 'good' | 'ok' | 'warn' | 'bad' = 'bad'
+    if (months >= 6) status = 'good'
+    else if (months >= 3) status = 'ok'
+    else if (months >= 1) status = 'warn'
+    else status = 'bad'
+    return { savingsBalance, months, target, progressToTarget, status }
+  }, [state.pockets, pocketBalances, averagesLast6.avgExpense])
+
+  // Comparativo mes actual vs anterior
+  const momComparison = useMemo(() => {
+    const incomeDelta = previousMonthRealIncome > 0
+      ? (currentMonthRealIncome - previousMonthRealIncome) / previousMonthRealIncome
+      : 0
+    const expenseDelta = previousMonthRealExpense > 0
+      ? (currentMonthRealExpense - previousMonthRealExpense) / previousMonthRealExpense
+      : 0
+    const currentSavings = currentMonthRealIncome - currentMonthRealExpense
+    const previousSavings = previousMonthRealIncome - previousMonthRealExpense
+    const savingsDelta = previousSavings !== 0
+      ? (currentSavings - previousSavings) / Math.abs(previousSavings)
+      : 0
+    return {
+      currentIncome: currentMonthRealIncome,
+      previousIncome: previousMonthRealIncome,
+      incomeDelta,
+      currentExpense: currentMonthRealExpense,
+      previousExpense: previousMonthRealExpense,
+      expenseDelta,
+      currentSavings,
+      previousSavings,
+      savingsDelta,
+    }
+  }, [
+    currentMonthRealIncome,
+    previousMonthRealIncome,
+    currentMonthRealExpense,
+    previousMonthRealExpense,
+  ])
+
+  // Tendencia por categoría
+  const categoryTrends = useMemo(() => {
+    const prevMonths = [
+      getMonthKeyFromOffset(currentMonthKey, -1),
+      getMonthKeyFromOffset(currentMonthKey, -2),
+      getMonthKeyFromOffset(currentMonthKey, -3),
+    ]
+    const buckets: Record<string, { current: number; previous: number }> = {}
+    state.expenses.forEach((expense) => {
+      if (expense.date.startsWith(currentMonthKey)) {
+        buckets[expense.category] = buckets[expense.category] ?? { current: 0, previous: 0 }
+        buckets[expense.category].current += expense.amount
+      } else if (prevMonths.some((m) => expense.date.startsWith(m))) {
+        buckets[expense.category] = buckets[expense.category] ?? { current: 0, previous: 0 }
+        buckets[expense.category].previous += expense.amount / 3
+      }
+    })
+    return Object.entries(buckets)
+      .map(([category, values]) => {
+        const delta = values.previous > 0
+          ? (values.current - values.previous) / values.previous
+          : values.current > 0 ? 1 : 0
+        return {
+          category,
+          current: values.current,
+          avgPrevious: values.previous,
+          delta,
+        }
+      })
+      .filter((item) => item.current > 0)
+      .sort((a, b) => b.current - a.current)
+      .slice(0, 6)
+  }, [state.expenses, currentMonthKey])
+
+  // Histórico tasa de ahorro
+  const savingsRateHistory = useMemo(() => {
+    return monthlyFlowSeries.map((month) => ({
+      label: month.label,
+      value: month.income > 0 ? Math.round(((month.income - month.expense) / month.income) * 100) : 0,
+    }))
+  }, [monthlyFlowSeries])
+
+  // Patrón por día de la semana
+  const spendingByWeekday = useMemo(() => {
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+    const last3MonthKeys = [
+      currentMonthKey,
+      getMonthKeyFromOffset(currentMonthKey, -1),
+      getMonthKeyFromOffset(currentMonthKey, -2),
+    ]
+    const totals = Array(7).fill(0) as number[]
+    const counts = Array(7).fill(0) as number[]
+    state.expenses
+      .filter((expense) => last3MonthKeys.some((m) => expense.date.startsWith(m)))
+      .forEach((expense) => {
+        const date = new Date(`${expense.date}T00:00:00`)
+        const weekday = date.getDay()
+        totals[weekday] += expense.amount
+        counts[weekday] += 1
+      })
+    return dayNames.map((label, index) => ({
+      label: label.slice(0, 3),
+      fullLabel: label,
+      value: counts[index] > 0 ? Math.round(totals[index] / counts[index]) : 0,
+      count: counts[index],
+    }))
+  }, [state.expenses, currentMonthKey])
+
+  // Gastos hormiga
+  const smallExpensesAnalysis = useMemo(() => {
+    const threshold = 50000
+    const small = state.expenses
+      .filter((expense) => expense.amount < threshold && expense.date.startsWith(currentMonthKey))
+    const total = small.reduce((sum, item) => sum + item.amount, 0)
+    const byDescription = small.reduce<Record<string, { count: number; total: number }>>(
+      (acc, expense) => {
+        const key = normalize(expense.description)
+        acc[key] = acc[key] ?? { count: 0, total: 0 }
+        acc[key].count += 1
+        acc[key].total += expense.amount
+        return acc
+      },
+      {},
+    )
+    const recurring = Object.entries(byDescription)
+      .map(([key, value]) => {
+        const sample = small.find((e) => normalize(e.description) === key)
+        return {
+          description: sample?.description ?? key,
+          count: value.count,
+          total: value.total,
+        }
+      })
+      .filter((item) => item.count >= 2)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+    return { total, count: small.length, threshold, recurring }
+  }, [state.expenses, currentMonthKey])
+
+  // Alertas inteligentes
+  const smartAlerts = useMemo(() => {
+    const alerts: Array<{ id: string; tone: 'warn' | 'bad' | 'info'; title: string; detail: string }> = []
+
+    // Categorías que se dispararon
+    categoryTrends
+      .filter((trend) => trend.delta >= 0.3 && trend.avgPrevious > 10000)
+      .slice(0, 3)
+      .forEach((trend) => {
+        alerts.push({
+          id: `cat:${trend.category}`,
+          tone: trend.delta >= 0.5 ? 'bad' : 'warn',
+          title: `${trend.category} subó ${Math.round(trend.delta * 100)}%`,
+          detail: `${money.format(trend.current)} vs promedio ${money.format(trend.avgPrevious)}`,
+        })
+      })
+
+    // Bolsillos en rojo o muy bajos
+    state.pockets.forEach((pocket) => {
+      const balance = pocketBalances[pocket.id] ?? 0
+      if (balance < 0) {
+        alerts.push({
+          id: `pocket-neg:${pocket.id}`,
+          tone: 'bad',
+          title: `${pocket.name} en rojo`,
+          detail: `Saldo: ${money.format(balance)}`,
+        })
+      } else if (balance > 0 && balance < 50000) {
+        alerts.push({
+          id: `pocket-low:${pocket.id}`,
+          tone: 'warn',
+          title: `${pocket.name} con saldo bajo`,
+          detail: `Quedan ${money.format(balance)}`,
+        })
+      }
+    })
+
+    // Obligaciones próximas a vencer (próximos 5 días)
+    state.fixedExpenses
+      .filter((item) => item.active && item.lastPaidMonth !== currentMonthKey)
+      .forEach((item) => {
+        const daysUntilDue = item.dueDay - currentDay
+        if (daysUntilDue >= 0 && daysUntilDue <= 5) {
+          alerts.push({
+            id: `fixed:${item.id}`,
+            tone: daysUntilDue <= 2 ? 'bad' : 'warn',
+            title: `${item.title} vence ${daysUntilDue === 0 ? 'hoy' : `en ${daysUntilDue} día${daysUntilDue === 1 ? '' : 's'}`}`,
+            detail: `${money.format(item.amount)} · día ${item.dueDay}`,
+          })
+        }
+      })
+
+    // Pace alert
+    if (monthPace.status === 'bad') {
+      alerts.push({
+        id: 'pace',
+        tone: 'bad',
+        title: `Vas ${Math.round((monthPace.paceRatio - 1) * 100)}% sobre el ritmo`,
+        detail: `Has gastado ${money.format(monthPace.actualSpent)} vs ${money.format(monthPace.expectedSpentByNow)} esperado.`,
+      })
+    }
+
+    return alerts.slice(0, 8)
+  }, [categoryTrends, state.pockets, pocketBalances, state.fixedExpenses, currentMonthKey, currentDay, monthPace])
+
+  // Proyección con escenarios
+  const scenarioProjection = useMemo(() => {
+    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const optimisticNet = averagesLast6.avgIncome * 1.05 - averagesLast6.avgExpense * 0.9
+    const realisticNet = averagesLast6.avgNet
+    const pessimisticNet = averagesLast6.avgIncome * 0.9 - averagesLast6.avgExpense * 1.15
+
+    const series: Array<{ label: string; pesimista: number; realista: number; optimista: number }> = [
+      { label: 'Hoy', pesimista: totalCash, realista: totalCash, optimista: totalCash },
+    ]
+    let p = totalCash
+    let r = totalCash
+    let o = totalCash
+    for (let i = 1; i <= 6; i++) {
+      p += pessimisticNet
+      r += realisticNet
+      o += optimisticNet
+      const futureKey = getMonthKeyFromOffset(currentMonthKey, i)
+      series.push({ label: futureKey.slice(5), pesimista: p, realista: r, optimista: o })
+    }
+    return { series, currentTotal: totalCash, optimisticEnd: o, realisticEnd: r, pessimisticEnd: p }
+  }, [pocketBalances, averagesLast6.avgIncome, averagesLast6.avgExpense, averagesLast6.avgNet, currentMonthKey])
 
   const fixedStatus = useMemo(() => {
     const activeItems = state.fixedExpenses.filter((item) => item.active)
@@ -2254,6 +2858,11 @@ function App() {
 
       if (!window.confirm(confirmMsg)) return
 
+      // 🛡️ Marca explícita para borrado remoto (el sync NO borra por diferencia)
+      if (kind === 'gasto') markEntityForRemoteDelete('expense', movementId)
+      else if (kind === 'ingreso') markEntityForRemoteDelete('income', movementId)
+      else markEntityForRemoteDelete('transfer', movementId)
+
       setState((current) => {
         if (kind === 'gasto') {
           return {
@@ -2621,6 +3230,9 @@ function App() {
 
     if (!window.confirm(`Se eliminara el bolsillo ${targetPocket.name}. Esta accion no se puede deshacer.`)) return
 
+    // 🛡️ Marca explícita para borrado remoto
+    markEntityForRemoteDelete('pocket', pocketId)
+
     setState((current) => ({
       ...current,
       pockets: current.pockets.filter((item) => item.id !== pocketId),
@@ -2785,6 +3397,8 @@ function App() {
     const actionKey = `provisiones:eliminar:${provisionId}`
     if (!beginAction(actionKey)) return
     try {
+      // 🛡️ Marca explícita para borrado remoto
+      markEntityForRemoteDelete('provision', provisionId)
       setState((current) => ({
         ...current,
         provisions: current.provisions.filter((item) => item.id !== provisionId),
@@ -2800,6 +3414,174 @@ function App() {
       ...current,
       provisions: current.provisions.map((item) =>
         item.id === provisionId ? { ...item, active: !item.active } : item,
+      ),
+    }))
+  }
+
+  function resetGoalForm() {
+    setGoalForm({
+      id: '',
+      name: '',
+      type: 'fixed-term',
+      pocketId: state.pockets[0]?.id ?? initialState.pockets[0].id,
+      targetAmount: '',
+      targetDate: '',
+      icon: '🎯',
+      color: '#7c3aed',
+      description: '',
+      createNewPocket: false,
+      newPocketName: '',
+    })
+  }
+
+  function startEditGoal(goalId: string) {
+    const goal = state.goals.find((item) => item.id === goalId)
+    if (!goal) return
+    setOpenComposer('metas')
+    setGoalForm({
+      id: goal.id,
+      name: goal.name,
+      type: goal.type,
+      pocketId: goal.pocketId,
+      targetAmount: String(goal.targetAmount),
+      targetDate: goal.targetDate ?? '',
+      icon: goal.icon,
+      color: goal.color,
+      description: goal.description ?? '',
+      createNewPocket: false,
+      newPocketName: '',
+    })
+  }
+
+  function handleAddGoal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const targetAmount = Number(goalForm.targetAmount)
+    if (!goalForm.name.trim() || targetAmount <= 0) {
+      showUiNotice('Datos incompletos', 'Ingresa nombre y monto objetivo válidos.')
+      return
+    }
+    if (goalForm.type === 'fixed-term') {
+      if (!goalForm.targetDate) {
+        showUiNotice('Falta fecha objetivo', 'Las metas de término fijo requieren una fecha objetivo.')
+        return
+      }
+      if (goalForm.targetDate <= today) {
+        showUiNotice('Fecha inválida', 'La fecha objetivo debe ser posterior a hoy.')
+        return
+      }
+    }
+
+    const actionKey = goalForm.id ? 'metas:guardar' : 'metas:crear'
+    if (!beginAction(actionKey)) return
+    try {
+      setState((current) => {
+        let targetPocketId = goalForm.pocketId
+
+        if (goalForm.createNewPocket && goalForm.newPocketName.trim()) {
+          const newPocket: Pocket = {
+            id: crypto.randomUUID(),
+            name: goalForm.newPocketName.trim(),
+            balance: 0,
+            color: goalForm.color,
+            icon: goalForm.icon,
+            type: 'invest',
+          }
+          targetPocketId = newPocket.id
+          const nextGoal: Goal = {
+            id: goalForm.id || crypto.randomUUID(),
+            name: goalForm.name.trim(),
+            type: goalForm.type,
+            pocketId: targetPocketId,
+            targetAmount,
+            targetDate: goalForm.type === 'fixed-term' ? goalForm.targetDate : undefined,
+            startDate: today,
+            icon: goalForm.icon,
+            color: goalForm.color,
+            description: goalForm.description.trim() || undefined,
+            active: true,
+          }
+          return {
+            ...current,
+            pockets: [...current.pockets, newPocket],
+            goals: goalForm.id
+              ? current.goals.map((item) => (item.id === goalForm.id ? nextGoal : item))
+              : [nextGoal, ...current.goals],
+          }
+        }
+
+        const existing = current.goals.find((item) => item.id === goalForm.id)
+        const nextGoal: Goal = {
+          id: goalForm.id || crypto.randomUUID(),
+          name: goalForm.name.trim(),
+          type: goalForm.type,
+          pocketId: targetPocketId,
+          targetAmount,
+          targetDate: goalForm.type === 'fixed-term' ? goalForm.targetDate : undefined,
+          startDate: existing?.startDate ?? today,
+          icon: goalForm.icon,
+          color: goalForm.color,
+          description: goalForm.description.trim() || undefined,
+          active: existing?.active ?? true,
+          completedAt: existing?.completedAt,
+        }
+
+        return {
+          ...current,
+          goals: goalForm.id
+            ? current.goals.map((item) => (item.id === goalForm.id ? nextGoal : item))
+            : [nextGoal, ...current.goals],
+        }
+      })
+
+      showUiNotice(
+        goalForm.id ? 'Meta actualizada' : 'Meta creada',
+        goalForm.id
+          ? `Se actualizaron los datos de "${goalForm.name.trim()}".`
+          : `"${goalForm.name.trim()}" fue añadida a tus metas.`,
+      )
+      resetGoalForm()
+      setOpenComposer(null)
+    } finally {
+      endAction(actionKey)
+    }
+  }
+
+  function handleDeleteGoal(goalId: string) {
+    const goal = state.goals.find((item) => item.id === goalId)
+    if (!goal) return
+    const actionKey = `metas:eliminar:${goalId}`
+    if (!beginAction(actionKey)) return
+    try {
+      // 🛡️ Marca explícita para borrado remoto
+      markEntityForRemoteDelete('goal', goalId)
+      setState((current) => ({
+        ...current,
+        goals: current.goals.filter((item) => item.id !== goalId),
+      }))
+      showUiNotice('Meta eliminada', `"${goal.name}" fue eliminada de tus metas.`)
+    } finally {
+      endAction(actionKey)
+    }
+  }
+
+  function handleCompleteGoal(goalId: string) {
+    setState((current) => ({
+      ...current,
+      goals: current.goals.map((item) =>
+        item.id === goalId
+          ? { ...item, active: false, completedAt: new Date().toISOString() }
+          : item,
+      ),
+    }))
+    const goal = state.goals.find((item) => item.id === goalId)
+    if (goal) showUiNotice('Meta completada', `¡Felicidades! "${goal.name}" está completada.`)
+  }
+
+  function handleReactivateGoal(goalId: string) {
+    setState((current) => ({
+      ...current,
+      goals: current.goals.map((item) =>
+        item.id === goalId ? { ...item, active: true, completedAt: undefined } : item,
       ),
     }))
   }
@@ -2947,6 +3729,13 @@ function App() {
       if (state.categories.length <= 1) return
       if (!window.confirm(`La categoria ${category} se reemplazara por Otros en los registros actuales.`)) return
 
+      // 🛡️ Marca explícita para borrado remoto
+      markEntityForRemoteDelete('category', category)
+      // Las reglas asociadas también se borran del remoto
+      state.learningRules
+        .filter((rule) => rule.category === category)
+        .forEach((rule) => markEntityForRemoteDelete('learningRule', rule.keyword))
+
       setState((current) => ({
         ...current,
         categories: current.categories.filter((item) => item !== category),
@@ -2967,6 +3756,8 @@ function App() {
     const actionKey = `reglas:eliminar:${keyword}`
     if (!beginAction(actionKey)) return
     try {
+      // 🛡️ Marca explícita para borrado remoto
+      markEntityForRemoteDelete('learningRule', keyword)
       setState((current) => ({
         ...current,
         learningRules: current.learningRules.filter((rule) => rule.keyword !== keyword),
@@ -6400,6 +7191,480 @@ function App() {
     )
   }
 
+  function renderMetasView() {
+    const isGoalBusy = Boolean(actionLoading[goalForm.id ? 'metas:guardar' : 'metas:crear'])
+    const totalTarget = activeGoals.reduce((sum, g) => sum + g.goal.targetAmount, 0)
+    const totalAccumulated = activeGoals.reduce((sum, g) => sum + g.currentAmount, 0)
+    const overallProgress = totalTarget > 0 ? Math.min(1, totalAccumulated / totalTarget) : 0
+
+    return (
+      <section className="dashboard-grid">
+        <div className="primary-column">
+          <div className="debt-register-cta">
+            <button
+              className="action-trigger ghost debt-register-trigger"
+              type="button"
+              onClick={() => {
+                resetGoalForm()
+                setOpenComposer('metas')
+              }}
+            >
+              Nueva meta
+            </button>
+          </div>
+
+          {openComposer === 'metas' && (
+            <FullscreenComposer
+              isOpen={openComposer === 'metas'}
+              label="Meta de ahorro"
+              title={goalForm.id ? 'Editar meta' : 'Nueva meta'}
+              description="Define un objetivo de ahorro acumulativo. Las metas de término fijo calculan cuánto debes destinar cada mes."
+              toolbarClassName="no-sticky"
+              bodyClassName="scroll-on-panel"
+              onClose={() => {
+                resetGoalForm()
+                setOpenComposer(null)
+              }}
+            >
+              <form className="bank-form" onSubmit={handleAddGoal}>
+                <div className="goal-type-selector">
+                  <button
+                    type="button"
+                    className={`goal-type-option ${goalForm.type === 'fixed-term' ? 'active' : ''}`}
+                    onClick={() => setGoalForm((current) => ({ ...current, type: 'fixed-term' }))}
+                  >
+                    <strong>Término fijo</strong>
+                    <small>Tienes fecha objetivo · te dice cuánto ahorrar al mes</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={`goal-type-option ${goalForm.type === 'indefinite' ? 'active' : ''}`}
+                    onClick={() => setGoalForm((current) => ({ ...current, type: 'indefinite', targetDate: '' }))}
+                  >
+                    <strong>Indefinido</strong>
+                    <small>Sin fecha límite · ahorras a tu ritmo</small>
+                  </button>
+                </div>
+
+                <label>
+                  Nombre de la meta
+                  <input
+                    value={goalForm.name}
+                    onChange={(event) => setGoalForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Ej. Viaje a Europa, Casa propia, Moto"
+                  />
+                </label>
+
+                <div className="form-grid two">
+                  <label>
+                    Monto objetivo
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={goalForm.targetAmount}
+                      onChange={(event) =>
+                        setGoalForm((current) => ({ ...current, targetAmount: keepOnlyDigits(event.target.value) }))
+                      }
+                      placeholder="5000000"
+                    />
+                  </label>
+                  {goalForm.type === 'fixed-term' && (
+                    <label>
+                      Fecha objetivo
+                      <input
+                        type="date"
+                        value={goalForm.targetDate}
+                        min={today}
+                        onChange={(event) =>
+                          setGoalForm((current) => ({ ...current, targetDate: event.target.value }))
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <div className="form-grid two">
+                  <label>
+                    Icono
+                    <select
+                      value={goalForm.icon}
+                      onChange={(event) => setGoalForm((current) => ({ ...current, icon: event.target.value }))}
+                    >
+                      {pocketIcons.map((icon) => (
+                        <option key={icon} value={icon}>
+                          {icon}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Color
+                    <input
+                      type="color"
+                      value={goalForm.color}
+                      onChange={(event) => setGoalForm((current) => ({ ...current, color: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="provision-pocket-toggle">
+                  <label className="provision-toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={goalForm.createNewPocket}
+                      onChange={(event) =>
+                        setGoalForm((current) => ({ ...current, createNewPocket: event.target.checked }))
+                      }
+                    />
+                    Crear un nuevo bolsillo dedicado a esta meta
+                  </label>
+                </div>
+
+                {goalForm.createNewPocket ? (
+                  <label>
+                    Nombre del nuevo bolsillo
+                    <input
+                      value={goalForm.newPocketName}
+                      onChange={(event) =>
+                        setGoalForm((current) => ({ ...current, newPocketName: event.target.value }))
+                      }
+                      placeholder="Ej. Fondo Europa, Ahorro casa"
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Bolsillo donde se acumula
+                    <select
+                      value={goalForm.pocketId}
+                      onChange={(event) => setGoalForm((current) => ({ ...current, pocketId: event.target.value }))}
+                    >
+                      {state.pockets.map((pocket) => (
+                        <option key={pocket.id} value={pocket.id}>
+                          {pocket.icon} {pocket.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label>
+                  Descripción (opcional)
+                  <input
+                    value={goalForm.description}
+                    onChange={(event) => setGoalForm((current) => ({ ...current, description: event.target.value }))}
+                    placeholder="Detalles, motivación, recordatorio..."
+                  />
+                </label>
+
+                <button type="submit" disabled={isGoalBusy}>
+                  {isGoalBusy
+                    ? goalForm.id ? 'Guardando...' : 'Creando...'
+                    : goalForm.id ? 'Guardar meta' : 'Crear meta'}
+                </button>
+                {goalForm.id && (
+                  <button
+                    type="button"
+                    className="secondary-button cancel-action"
+                    onClick={() => {
+                      resetGoalForm()
+                      setOpenComposer(null)
+                    }}
+                  >
+                    Cancelar edición
+                  </button>
+                )}
+              </form>
+            </FullscreenComposer>
+          )}
+
+          {/* ─── Resumen general ─── */}
+          {activeGoals.length > 0 && (
+            <SectionFrame
+              label="Visión general"
+              title="Todas tus metas"
+              subtitle={`${activeGoals.length} activa(s) · ${money.format(totalAccumulated)} de ${money.format(totalTarget)}`}
+              collapsed={isSectionCollapsed('metas-resumen')}
+              onToggle={() => toggleSection('metas-resumen')}
+              emphasis
+            >
+              <div className="goals-overview">
+                <div className="goals-overall-bar">
+                  <div className="goals-overall-track">
+                    <div
+                      className="goals-overall-fill"
+                      style={{ width: `${overallProgress * 100}%` }}
+                    />
+                  </div>
+                  <div className="goals-overall-meta">
+                    <span>{percent.format(overallProgress)} acumulado</span>
+                    <strong>Faltan {money.format(totalTarget - totalAccumulated)}</strong>
+                  </div>
+                </div>
+              </div>
+            </SectionFrame>
+          )}
+
+          <SectionFrame
+            label="Metas activas"
+            title="En progreso"
+            subtitle={`${activeGoals.length} meta(s) activa(s)`}
+            collapsed={isSectionCollapsed('metas-activas')}
+            onToggle={() => toggleSection('metas-activas')}
+          >
+            <div className="goals-stack">
+              {activeGoals.map((data) => {
+                const { goal, currentAmount, progress, remaining, isCompleted, monthlyContributionNeeded, daysRemaining, isOnTrack, estimatedCompletionDate } = data
+                const pocket = state.pockets.find((p) => p.id === goal.pocketId)
+                const accentColor = goal.color
+
+                return (
+                  <article
+                    key={goal.id}
+                    className={`goal-card ${isCompleted ? 'goal-completed' : ''}`}
+                    style={{ '--goal-accent': accentColor } as React.CSSProperties}
+                  >
+                    <div className="goal-card-head">
+                      <div className="goal-card-identity">
+                        <span className="goal-icon" style={{ background: `${accentColor}22`, color: accentColor }}>
+                          {goal.icon}
+                        </span>
+                        <div>
+                          <div className="card-title-row">
+                            <strong>{goal.name}</strong>
+                            <span className={`goal-type-badge ${goal.type}`}>
+                              {goal.type === 'fixed-term' ? 'Término fijo' : 'Indefinido'}
+                            </span>
+                          </div>
+                          <p className="goal-meta">
+                            {pocket?.icon} {pocket?.name ?? 'Sin bolsillo'}
+                            {goal.targetDate && ` · vence ${formatDateInputDisplay(goal.targetDate)}`}
+                          </p>
+                          {goal.description && <p className="goal-description">{goal.description}</p>}
+                        </div>
+                      </div>
+                      <div className="goal-card-actions">
+                        <button
+                          type="button"
+                          className="edit-icon-button"
+                          aria-label={`Editar meta ${goal.name}`}
+                          onClick={() => startEditGoal(goal.id)}
+                        >
+                          <LuPencil />
+                        </button>
+                        <button
+                          type="button"
+                          className="edit-icon-button"
+                          aria-label={`Eliminar meta ${goal.name}`}
+                          onClick={() => handleDeleteGoal(goal.id)}
+                        >
+                          <LuTrash2 />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="goal-progress-section">
+                      <div className="goal-progress-numbers">
+                        <strong style={{ color: accentColor }}>{money.format(currentAmount)}</strong>
+                        <small>de {money.format(goal.targetAmount)}</small>
+                      </div>
+                      <div className="goal-progress-bar">
+                        <div
+                          className="goal-progress-fill"
+                          style={{
+                            width: `${progress * 100}%`,
+                            background: isCompleted
+                              ? 'linear-gradient(90deg, #34d399, #10b981)'
+                              : `linear-gradient(90deg, ${accentColor}, ${accentColor}dd)`,
+                          }}
+                        />
+                      </div>
+                      <div className="goal-progress-percent">
+                        <span>{percent.format(progress)} completado</span>
+                        {!isCompleted && <span>Faltan {money.format(remaining)}</span>}
+                      </div>
+                    </div>
+
+                    {!isCompleted && (
+                      <div className="goal-insights">
+                        {goal.type === 'fixed-term' && (
+                          <>
+                            <div className="goal-insight">
+                              <span>Cuota sugerida</span>
+                              <strong>{money.format(Math.ceil(monthlyContributionNeeded))}/mes</strong>
+                            </div>
+                            <div className="goal-insight">
+                              <span>Tiempo restante</span>
+                              <strong>{daysRemaining} días</strong>
+                            </div>
+                            <div className="goal-insight">
+                              <span>Estado</span>
+                              <strong className={isOnTrack ? 'positive' : 'negative'}>
+                                {isOnTrack ? '✓ Al día' : '⚠ Atrasado'}
+                              </strong>
+                            </div>
+                          </>
+                        )}
+                        {goal.type === 'indefinite' && (
+                          <>
+                            <div className="goal-insight">
+                              <span>Ritmo diario</span>
+                              <strong>{money.format(Math.round(data.dailyPace))}/día</strong>
+                            </div>
+                            <div className="goal-insight">
+                              <span>Llegada estimada</span>
+                              <strong>
+                                {estimatedCompletionDate ? formatDateInputDisplay(estimatedCompletionDate) : '—'}
+                              </strong>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {isCompleted && (
+                      <div className="goal-completion-banner">
+                        <span>🎉 ¡Meta alcanzada!</span>
+                        <button
+                          type="button"
+                          className="action-trigger debt-trigger"
+                          onClick={() => handleCompleteGoal(goal.id)}
+                        >
+                          Marcar como completada
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+              {activeGoals.length === 0 && (
+                <p className="empty-copy">
+                  No tienes metas activas. Crea una para empezar a perseguir tus objetivos.
+                </p>
+              )}
+            </div>
+          </SectionFrame>
+
+          {completedGoals.filter((g) => !g.goal.active).length > 0 && (
+            <SectionFrame
+              label="Logros"
+              title="Metas completadas"
+              subtitle={`${completedGoals.filter((g) => !g.goal.active).length} meta(s) alcanzada(s)`}
+              collapsed={isSectionCollapsed('metas-completadas')}
+              onToggle={() => toggleSection('metas-completadas')}
+            >
+              <div className="goals-stack">
+                {completedGoals
+                  .filter((g) => !g.goal.active)
+                  .map((data) => {
+                    const { goal } = data
+                    return (
+                      <article key={goal.id} className="goal-card goal-archived">
+                        <div className="goal-card-head">
+                          <div className="goal-card-identity">
+                            <span
+                              className="goal-icon"
+                              style={{ background: `${goal.color}22`, color: goal.color }}
+                            >
+                              {goal.icon}
+                            </span>
+                            <div>
+                              <strong>{goal.name}</strong>
+                              <p className="goal-meta">
+                                Completada · {money.format(goal.targetAmount)}
+                                {goal.completedAt && ` · ${formatDateInputDisplay(goal.completedAt.slice(0, 10))}`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="goal-card-actions">
+                            <button
+                              type="button"
+                              className="edit-icon-button"
+                              aria-label={`Reactivar meta ${goal.name}`}
+                              onClick={() => handleReactivateGoal(goal.id)}
+                            >
+                              <LuTrophy />
+                            </button>
+                            <button
+                              type="button"
+                              className="edit-icon-button"
+                              aria-label={`Eliminar meta ${goal.name}`}
+                              onClick={() => handleDeleteGoal(goal.id)}
+                            >
+                              <LuTrash2 />
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+              </div>
+            </SectionFrame>
+          )}
+        </div>
+
+        <aside className="secondary-column">
+          <section className="panel banking-panel emphasis">
+            <span className="micro-label">Resumen</span>
+            <h2>Tus metas</h2>
+            <div className="status-grid">
+              <div>
+                <span>Total objetivo</span>
+                <strong>{money.format(totalTarget)}</strong>
+              </div>
+              <div>
+                <span>Acumulado</span>
+                <strong>{money.format(totalAccumulated)}</strong>
+              </div>
+              <div>
+                <span>Activas</span>
+                <strong>{activeGoals.length}</strong>
+              </div>
+              <div>
+                <span>Completadas</span>
+                <strong>{completedGoals.filter((g) => !g.goal.active).length}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel banking-panel">
+            <span className="micro-label">Compromiso mensual</span>
+            <h2>Cuotas sugeridas</h2>
+            <div className="review-list">
+              {activeGoals
+                .filter((g) => g.goal.type === 'fixed-term' && !g.isCompleted)
+                .map((data) => (
+                  <div key={data.goal.id} className="review-chip">
+                    <span>
+                      {data.goal.icon} {data.goal.name}
+                      <small className="chip-meta">{data.daysRemaining} días restantes</small>
+                    </span>
+                    <strong>{money.format(Math.ceil(data.monthlyContributionNeeded))}</strong>
+                  </div>
+                ))}
+              {activeGoals.filter((g) => g.goal.type === 'fixed-term' && !g.isCompleted).length === 0 && (
+                <p className="empty-copy">No tienes metas con fecha objetivo activa.</p>
+              )}
+            </div>
+            {activeGoals.filter((g) => g.goal.type === 'fixed-term' && !g.isCompleted).length > 0 && (
+              <p className="analytics-footnote">
+                Suma cuotas:{' '}
+                {money.format(
+                  Math.ceil(
+                    activeGoals
+                      .filter((g) => g.goal.type === 'fixed-term' && !g.isCompleted)
+                      .reduce((sum, g) => sum + g.monthlyContributionNeeded, 0),
+                  ),
+                )}
+                /mes para alcanzar todas tus metas a tiempo.
+              </p>
+            )}
+          </section>
+        </aside>
+      </section>
+    )
+  }
+
   function renderAnalisisView() {
     const healthLabel =
       averagesLast6.savingsRate >= 0.2
@@ -6419,16 +7684,123 @@ function App() {
             ? { text: 'Saludable', tone: 'good' }
             : { text: 'Sin deuda', tone: 'good' }
 
+    const formatDelta = (delta: number) => {
+      const sign = delta > 0 ? '+' : ''
+      return `${sign}${(delta * 100).toFixed(0)}%`
+    }
+
     return (
       <section className="dashboard-grid">
         <div className="primary-column">
+          {/* ─── KPIs DIARIOS - Lo más importante del día ─── */}
+          <SectionFrame
+            label="Hoy"
+            title="Pulso del día"
+            subtitle="Las métricas que importan ahora mismo"
+            collapsed={isSectionCollapsed('analisis-kpis')}
+            onToggle={() => toggleSection('analisis-kpis')}
+            emphasis
+          >
+            <div className="kpi-grid">
+              <div className="kpi-card kpi-primary">
+                <span className="kpi-label">Puedes gastar hoy</span>
+                <strong className="kpi-value">{money.format(dailyBudget.perDay)}</strong>
+                <small className="kpi-detail">
+                  {money.format(dailyBudget.available)} disponibles / {dailyBudget.daysRemaining} días restantes
+                </small>
+              </div>
+              <div className={`kpi-card kpi-${monthPace.status}`}>
+                <span className="kpi-label">Ritmo del mes</span>
+                <strong className="kpi-value">{monthPace.label}</strong>
+                <small className="kpi-detail">
+                  {percent.format(monthPace.dayProgress)} del mes · {money.format(monthPace.actualSpent)} gastado
+                </small>
+              </div>
+              <div className={`kpi-card kpi-${financialRunway.status}`}>
+                <span className="kpi-label">Autonomía</span>
+                <strong className="kpi-value">
+                  {financialRunway.months < 100 ? `${financialRunway.months.toFixed(1)} meses` : '∞'}
+                </strong>
+                <small className="kpi-detail">Sin ingresos, con gasto promedio</small>
+              </div>
+              <div className={`kpi-card kpi-${emergencyFundCoverage.status}`}>
+                <span className="kpi-label">Fondo emergencia</span>
+                <strong className="kpi-value">{emergencyFundCoverage.months.toFixed(1)} meses</strong>
+                <small className="kpi-detail">
+                  Meta: 3 meses · {percent.format(emergencyFundCoverage.progressToTarget)} del objetivo
+                </small>
+              </div>
+            </div>
+          </SectionFrame>
+
+          {/* ─── ALERTAS INTELIGENTES ─── */}
+          {smartAlerts.length > 0 && (
+            <SectionFrame
+              label="Atención"
+              title="Alertas activas"
+              subtitle={`${smartAlerts.length} señal(es) que requieren tu atención`}
+              collapsed={isSectionCollapsed('analisis-alertas')}
+              onToggle={() => toggleSection('analisis-alertas')}
+            >
+              <div className="alerts-stack">
+                {smartAlerts.map((alert) => (
+                  <div key={alert.id} className={`alert-chip alert-${alert.tone}`}>
+                    <div className="alert-indicator" />
+                    <div className="alert-body">
+                      <strong>{alert.title}</strong>
+                      <small>{alert.detail}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionFrame>
+          )}
+
+          {/* ─── COMPARATIVO MES ACTUAL VS ANTERIOR ─── */}
+          <SectionFrame
+            label="Mes a mes"
+            title="Este mes vs el anterior"
+            subtitle="Cómo te comparas con el período pasado"
+            collapsed={isSectionCollapsed('analisis-mom')}
+            onToggle={() => toggleSection('analisis-mom')}
+          >
+            <div className="mom-grid">
+              <div className="mom-card">
+                <span className="mom-label">Ingresos</span>
+                <strong>{money.format(momComparison.currentIncome)}</strong>
+                <small className="mom-previous">vs {money.format(momComparison.previousIncome)}</small>
+                <span className={`mom-delta ${momComparison.incomeDelta >= 0 ? 'positive' : 'negative'}`}>
+                  {momComparison.incomeDelta >= 0 ? '↑' : '↓'} {formatDelta(momComparison.incomeDelta)}
+                </span>
+              </div>
+              <div className="mom-card">
+                <span className="mom-label">Gastos</span>
+                <strong>{money.format(momComparison.currentExpense)}</strong>
+                <small className="mom-previous">vs {money.format(momComparison.previousExpense)}</small>
+                <span className={`mom-delta ${momComparison.expenseDelta <= 0 ? 'positive' : 'negative'}`}>
+                  {momComparison.expenseDelta >= 0 ? '↑' : '↓'} {formatDelta(momComparison.expenseDelta)}
+                </span>
+              </div>
+              <div className="mom-card">
+                <span className="mom-label">Ahorro neto</span>
+                <strong className={momComparison.currentSavings >= 0 ? 'positive' : 'negative'}>
+                  {money.format(momComparison.currentSavings)}
+                </strong>
+                <small className="mom-previous">vs {money.format(momComparison.previousSavings)}</small>
+                <span className={`mom-delta ${momComparison.savingsDelta >= 0 ? 'positive' : 'negative'}`}>
+                  {momComparison.savingsDelta >= 0 ? '↑' : '↓'} {formatDelta(momComparison.savingsDelta)}
+                </span>
+              </div>
+            </div>
+          </SectionFrame>
+
+          {/* ─── SALUD FINANCIERA ORIGINAL ─── */}
           <SectionFrame
             label="Vista 360"
             title="Salud financiera"
             subtitle="Promedios de los ultimos 6 meses comparados con tu compromiso mensual."
             collapsed={isSectionCollapsed('analisis-salud')}
             onToggle={() => toggleSection('analisis-salud')}
-            emphasis
           >
             <div className="analytics-metrics">
               <div className="analytics-metric">
@@ -6502,30 +7874,86 @@ function App() {
             <LineAreaChart data={historicalBalanceSeries} />
           </SectionFrame>
 
+          {/* ─── TENDENCIA POR CATEGORÍA ─── */}
           <SectionFrame
-            label="Proyeccion"
-            title="Saldo estimado a 6 meses"
-            subtitle="Asume que el ahorro promedio actual se mantiene constante"
+            label="Tendencias"
+            title="¿Qué categorías subieron o bajaron?"
+            subtitle="Mes actual vs promedio de los últimos 3 meses"
+            collapsed={isSectionCollapsed('analisis-tendencias')}
+            onToggle={() => toggleSection('analisis-tendencias')}
+          >
+            <div className="trend-list">
+              {categoryTrends.map((trend) => {
+                const isUp = trend.delta > 0.05
+                const isDown = trend.delta < -0.05
+                const arrow = isUp ? '↑' : isDown ? '↓' : '→'
+                const toneClass = isUp ? 'negative' : isDown ? 'positive' : 'neutral'
+                return (
+                  <div key={trend.category} className="trend-row">
+                    <div className="trend-row-head">
+                      <span className="trend-category">{trend.category}</span>
+                      <span className={`trend-delta ${toneClass}`}>
+                        {arrow} {formatDelta(trend.delta)}
+                      </span>
+                    </div>
+                    <div className="trend-amounts">
+                      <strong>{money.format(trend.current)}</strong>
+                      <small>vs prom. {money.format(trend.avgPrevious)}</small>
+                    </div>
+                  </div>
+                )
+              })}
+              {categoryTrends.length === 0 && (
+                <p className="empty-copy">No hay categorías con gastos este mes para comparar.</p>
+              )}
+            </div>
+          </SectionFrame>
+
+          {/* ─── HISTÓRICO TASA DE AHORRO ─── */}
+          <SectionFrame
+            label="Disciplina"
+            title="Tasa de ahorro histórica"
+            subtitle="¿Estás mejorando? La meta saludable es 20%+"
+            collapsed={isSectionCollapsed('analisis-tasa-ahorro')}
+            onToggle={() => toggleSection('analisis-tasa-ahorro')}
+          >
+            <SavingsRateChart data={savingsRateHistory} />
+          </SectionFrame>
+
+          {/* ─── PATRÓN POR DÍA DE LA SEMANA ─── */}
+          <SectionFrame
+            label="Patrones"
+            title="Gasto por día de la semana"
+            subtitle="Promedio de los últimos 3 meses"
+            collapsed={isSectionCollapsed('analisis-semana')}
+            onToggle={() => toggleSection('analisis-semana')}
+          >
+            <WeekdayBarChart data={spendingByWeekday} />
+          </SectionFrame>
+
+          {/* ─── PROYECCIÓN CON ESCENARIOS ─── */}
+          <SectionFrame
+            label="Proyección"
+            title="Saldo a 6 meses · 3 escenarios"
+            subtitle="Optimista: gasto -10% e ingreso +5% · Pesimista: gasto +15% e ingreso -10%"
             collapsed={isSectionCollapsed('analisis-proyeccion')}
             onToggle={() => toggleSection('analisis-proyeccion')}
           >
             <div className="projection-shell">
-              <LineAreaChart data={savingsProjection.series} />
-              <div className="projection-meta">
+              <ScenarioAreaChart data={scenarioProjection.series} />
+              <div className="projection-meta scenarios">
                 <div>
-                  <span>Saldo actual</span>
-                  <strong>{money.format(savingsProjection.currentTotal)}</strong>
+                  <span>Optimista</span>
+                  <strong className="positive">{money.format(scenarioProjection.optimisticEnd)}</strong>
                 </div>
                 <div>
-                  <span>Proyeccion en 6 meses</span>
-                  <strong className={savingsProjection.projected6Months >= savingsProjection.currentTotal ? 'positive' : 'negative'}>
-                    {money.format(savingsProjection.projected6Months)}
-                  </strong>
+                  <span>Realista</span>
+                  <strong>{money.format(scenarioProjection.realisticEnd)}</strong>
                 </div>
                 <div>
-                  <span>Diferencia esperada</span>
-                  <strong>
-                    {money.format(savingsProjection.projected6Months - savingsProjection.currentTotal)}
+                  <span>Pesimista</span>
+                  <strong className={scenarioProjection.pessimisticEnd < 0 ? 'negative' : ''}>
+                    {money.format(scenarioProjection.pessimisticEnd)}
                   </strong>
                 </div>
               </div>
@@ -6622,6 +8050,39 @@ function App() {
               ))}
               {topExpensesThisMonth.length === 0 && (
                 <p className="empty-copy">No hay gastos registrados este mes todavia.</p>
+              )}
+            </div>
+          </SectionFrame>
+
+          {/* ─── GASTOS HORMIGA ─── */}
+          <SectionFrame
+            label="Gastos hormiga"
+            title="Pequeños pero frecuentes"
+            subtitle={`Transacciones menores a ${money.format(smallExpensesAnalysis.threshold)}`}
+            collapsed={isSectionCollapsed('analisis-hormiga')}
+            onToggle={() => toggleSection('analisis-hormiga')}
+          >
+            <div className="ant-expenses-summary">
+              <div className="ant-summary-card">
+                <span>Total acumulado</span>
+                <strong>{money.format(smallExpensesAnalysis.total)}</strong>
+                <small>{smallExpensesAnalysis.count} transacciones este mes</small>
+              </div>
+            </div>
+            <div className="review-list">
+              {smallExpensesAnalysis.recurring.map((item) => (
+                <div key={item.description} className="review-chip">
+                  <span>
+                    {item.description}
+                    <small className="chip-meta">{item.count} veces este mes</small>
+                  </span>
+                  <strong>{money.format(item.total)}</strong>
+                </div>
+              ))}
+              {smallExpensesAnalysis.recurring.length === 0 && (
+                <p className="empty-copy">
+                  No tienes patrones de gastos pequeños repetidos. ¡Bien hecho!
+                </p>
               )}
             </div>
           </SectionFrame>
@@ -7273,6 +8734,7 @@ function App() {
           {activeView === 'programacion' && renderProgrammingView()}
           {activeView === 'deudas' && renderDebtsView()}
           {activeView === 'provisiones' && renderProvisionesView()}
+          {activeView === 'metas' && renderMetasView()}
           {activeView === 'analisis' && renderAnalisisView()}
           {activeView === 'configuracion' && renderSettingsView()}
         </div>

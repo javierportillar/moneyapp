@@ -5,6 +5,8 @@ import type {
   DebtPayment,
   Expense,
   FixedExpense,
+  Goal,
+  GoalType,
   Income,
   LearningRule,
   MonthClosure,
@@ -31,7 +33,148 @@ const TABLES = {
   debtPayments: 'pagos_deudas',
   monthClosures: 'cierres_mensuales',
   provisions: 'provisiones',
+  goals: 'metas',
 } as const
+
+// ─────────────────────────────────────────────────────────────────
+// 🛡️ Pending deletes explícitos (refactor anti pérdida de datos)
+//
+// El sync ANTES funcionaba en modo "declarative": para cada tabla
+// borraba de la BD todo lo que no estuviera en el state local.
+// Eso es eficiente pero peligroso: si el state local quedaba vacío
+// por un bug, el siguiente save borraba TODO en Supabase.
+//
+// Nuevo modelo:
+//   - La UI llama markEntityForRemoteDelete(entity, key) cuando el
+//     usuario borra algo EXPLÍCITAMENTE.
+//   - El save() solo borra IDs que estén en pendingDeletes.
+//   - Nunca más se hace delete-por-diferencia para entidades del
+//     usuario (gastos, ingresos, bolsillos, etc.).
+// ─────────────────────────────────────────────────────────────────
+
+export type SyncDeletableEntity =
+  | 'expense'
+  | 'income'
+  | 'transfer'
+  | 'pocket'
+  | 'provision'
+  | 'goal'
+  | 'debt'
+  | 'obligation'
+  | 'category'
+  | 'learningRule'
+
+const ENTITY_TO_TABLE: Record<SyncDeletableEntity, string> = {
+  expense: TABLES.expenses,
+  income: TABLES.incomes,
+  transfer: TABLES.transfers,
+  pocket: TABLES.pockets,
+  provision: TABLES.provisions,
+  goal: TABLES.goals,
+  debt: TABLES.debts,
+  obligation: TABLES.obligations,
+  category: TABLES.categories,
+  learningRule: TABLES.learningRules,
+}
+
+// category usa columna "nombre", learningRule usa "palabra_clave",
+// el resto usa "app_id".
+const ENTITY_TO_KEY_COLUMN: Record<SyncDeletableEntity, 'app_id' | 'nombre' | 'palabra_clave'> = {
+  expense: 'app_id',
+  income: 'app_id',
+  transfer: 'app_id',
+  pocket: 'app_id',
+  provision: 'app_id',
+  goal: 'app_id',
+  debt: 'app_id',
+  obligation: 'app_id',
+  category: 'nombre',
+  learningRule: 'palabra_clave',
+}
+
+const PENDING_DELETES_KEY = 'finpilot-pending-remote-deletes'
+
+type PendingDeletes = Partial<Record<SyncDeletableEntity, string[]>>
+
+function getPendingDeletes(): PendingDeletes {
+  try {
+    const raw = localStorage.getItem(PENDING_DELETES_KEY)
+    return raw ? (JSON.parse(raw) as PendingDeletes) : {}
+  } catch {
+    return {}
+  }
+}
+
+function setPendingDeletes(pending: PendingDeletes) {
+  try {
+    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(pending))
+  } catch {
+    // si localStorage falla, no bloqueamos el flujo
+  }
+}
+
+/**
+ * Marca explícitamente una entidad para ser borrada de Supabase
+ * en el próximo save. Es la ÚNICA forma de borrar datos del servidor.
+ *
+ * @param entity tipo de entidad (expense, pocket, etc.)
+ * @param key    para la mayoría es el app_id; para category es el nombre,
+ *               para learningRule es la palabra_clave.
+ */
+export function markEntityForRemoteDelete(entity: SyncDeletableEntity, key: string) {
+  if (!key) return
+  const pending = getPendingDeletes()
+  pending[entity] = Array.from(new Set([...(pending[entity] ?? []), key]))
+  setPendingDeletes(pending)
+}
+
+async function processPendingDeletes(usuarioId: string): Promise<void> {
+  const pending = getPendingDeletes()
+  if (!Object.keys(pending).length) return
+
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+
+  const remaining: PendingDeletes = { ...pending }
+
+  for (const entity of Object.keys(pending) as SyncDeletableEntity[]) {
+    const keys = pending[entity] ?? []
+    if (!keys.length) {
+      delete remaining[entity]
+      continue
+    }
+
+    const table = ENTITY_TO_TABLE[entity]
+    const column = ENTITY_TO_KEY_COLUMN[entity]
+    try {
+      const { error } = await client
+        .from(table)
+        .delete()
+        .eq('usuario_id', usuarioId)
+        .in(column, keys)
+      if (error) {
+        const message = String((error as any)?.message ?? '')
+        const tableMissing =
+          message.includes('relation') ||
+          message.includes('does not exist') ||
+          message.includes('Could not find') ||
+          message.includes('schema cache')
+        if (tableMissing) {
+          // tabla aún no migrada — simplemente limpiamos los pendientes
+          delete remaining[entity]
+          continue
+        }
+        // si falla por otra razón, dejamos los pendientes para reintentar
+        continue
+      }
+      delete remaining[entity]
+    } catch {
+      // dejamos los pendientes para reintentar
+    }
+  }
+
+  setPendingDeletes(remaining)
+}
 
 function toNumber(value: unknown) {
   const numeric = Number(value)
@@ -73,7 +216,9 @@ function hasRelationalData(state: Partial<AppState>) {
     (state.fixedExpenses?.length ?? 0) > 0 ||
     (state.debts?.length ?? 0) > 0 ||
     (state.debtPayments?.length ?? 0) > 0 ||
-    (state.monthClosures?.length ?? 0) > 0
+    (state.monthClosures?.length ?? 0) > 0 ||
+    (state.provisions?.length ?? 0) > 0 ||
+    (state.goals?.length ?? 0) > 0
   )
 }
 
@@ -83,6 +228,46 @@ async function fetchExistingAppIds(table: string, usuarioId: string) {
   const { data, error } = await client.from(table).select('id, app_id').eq('usuario_id', usuarioId)
   if (error) throw error
   return new Map<string, string>((data ?? []).map((row: any) => [row.app_id, row.id]))
+}
+
+async function fetchExistingAppIdsOptional(table: string, usuarioId: string) {
+  // Igual que fetchExistingAppIds pero NO lanza si la tabla aún no existe en Supabase
+  // (útil para migraciones pendientes sin romper el flujo principal).
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { data, error } = await client.from(table).select('id, app_id').eq('usuario_id', usuarioId)
+  if (error) {
+    const message = String((error as any)?.message ?? '')
+    const tableMissing =
+      message.includes('relation') ||
+      message.includes('does not exist') ||
+      message.includes('Could not find') ||
+      message.includes('schema cache')
+    if (tableMissing) return new Map<string, string>()
+    throw error
+  }
+  return new Map<string, string>((data ?? []).map((row: any) => [row.app_id, row.id]))
+}
+
+async function upsertRowsOptional(table: string, rows: any[], onConflict: string) {
+  // Igual que upsertRows pero ignora silenciosamente si la tabla no existe.
+  if (!rows.length) return
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { error } = await client.from(table).upsert(rows, { onConflict })
+  if (!error) return
+  const message = String((error as any)?.message ?? '')
+  const tableMissing =
+    message.includes('relation') ||
+    message.includes('does not exist') ||
+    message.includes('Could not find') ||
+    message.includes('schema cache')
+  if (!tableMissing) throw error
+}
+
+async function deleteRowsByAppIdOptional(table: string, usuarioId: string, keepAppIds: string[]) {
+  // Delegamos al safe que ya incluye el guard de borrado masivo.
+  await deleteRowsByAppIdSafe(table, usuarioId, keepAppIds, { optional: true })
 }
 
 async function fetchExistingCategories(usuarioId: string) {
@@ -171,6 +356,13 @@ async function upsertRowsWithFallback(
   if (retryError) throw retryError
 }
 
+// 🛡️ PROTECCIÓN 2: Límite de borrado masivo
+// Si un sync intenta borrar más del MAX_DELETE_RATIO de los registros
+// existentes de una tabla, se bloquea. La causa más probable es un state
+// local corrupto/vacío, y queremos cortar la sangría antes de perder más.
+const MAX_DELETE_RATIO = 0.5
+const MAX_DELETE_ABSOLUTE_FLOOR = 5
+
 async function deleteRowsByAppId(table: string, usuarioId: string, keepAppIds: string[]) {
   const existing = await fetchExistingAppIds(table, usuarioId)
   const idsToDelete = [...existing.entries()]
@@ -178,6 +370,20 @@ async function deleteRowsByAppId(table: string, usuarioId: string, keepAppIds: s
     .map(([, id]) => id)
 
   if (!idsToDelete.length) return
+
+  // Si vamos a borrar más del 50% Y son al menos 5 registros, abortamos.
+  if (
+    existing.size >= MAX_DELETE_ABSOLUTE_FLOOR &&
+    idsToDelete.length / existing.size > MAX_DELETE_RATIO
+  ) {
+    throw new Error(
+      `Borrado masivo bloqueado en tabla "${table}": se intentaron borrar ` +
+        `${idsToDelete.length} de ${existing.size} registros (${Math.round(
+          (idsToDelete.length / existing.size) * 100,
+        )}%). Esto suele indicar un estado local corrupto. ` +
+        `Refresca la página y verifica tus datos antes de continuar.`,
+    )
+  }
 
   const client = getSupabaseClient()
   if (!client) throw new Error('Supabase no esta configurado.')
@@ -193,15 +399,91 @@ async function deleteMonthClosures(usuarioId: string, keepMonthKeys: string[]) {
 
   if (!idsToDelete.length) return
 
+  // Mismo guard de borrado masivo
+  if (
+    existing.size >= MAX_DELETE_ABSOLUTE_FLOOR &&
+    idsToDelete.length / existing.size > MAX_DELETE_RATIO
+  ) {
+    throw new Error(
+      `Borrado masivo bloqueado en cierres_mensuales: ${idsToDelete.length} de ${existing.size} (${Math.round(
+        (idsToDelete.length / existing.size) * 100,
+      )}%). Refresca antes de continuar.`,
+    )
+  }
+
   const client = getSupabaseClient()
   if (!client) throw new Error('Supabase no esta configurado.')
   const { error } = await client.from(TABLES.monthClosures).delete().in('id', idsToDelete)
   if (error) throw error
 }
 
+// Versión opcional con el mismo guard, para tablas que pueden no existir aún.
+async function deleteRowsByAppIdSafe(
+  table: string,
+  usuarioId: string,
+  keepAppIds: string[],
+  options: { optional?: boolean } = {},
+) {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { data, error: fetchError } = await client
+    .from(table)
+    .select('id, app_id')
+    .eq('usuario_id', usuarioId)
+  if (fetchError) {
+    const message = String((fetchError as any)?.message ?? '')
+    const tableMissing =
+      message.includes('relation') ||
+      message.includes('does not exist') ||
+      message.includes('Could not find') ||
+      message.includes('schema cache')
+    if (tableMissing && options.optional) return
+    throw fetchError
+  }
+  const rows = data ?? []
+  const idsToDelete = rows
+    .filter((row: any) => !keepAppIds.includes(row.app_id))
+    .map((row: any) => row.id)
+  if (!idsToDelete.length) return
+
+  if (
+    rows.length >= MAX_DELETE_ABSOLUTE_FLOOR &&
+    idsToDelete.length / rows.length > MAX_DELETE_RATIO
+  ) {
+    throw new Error(
+      `Borrado masivo bloqueado en tabla "${table}": ${idsToDelete.length} de ${rows.length}.`,
+    )
+  }
+
+  const { error } = await client.from(table).delete().in('id', idsToDelete)
+  if (error) throw error
+}
+
 export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): RemoteSnapshotDriver<T> | null {
   if (!usuarioId) return null
   if (!getSupabaseClient()) return null
+
+  // 🛡️ PROTECCIÓN 1: tracking de carga exitosa
+  // Si nunca se completó una carga exitosa, NO se permite ningún save.
+  // Esto evita que un load fallido (red, tabla faltante, etc.) deje el
+  // state local vacío y un save posterior borre todo en Supabase.
+  let lastLoadSucceeded = false
+
+  // 🛡️ PROTECCIÓN 3: snapshot rotativo en localStorage antes de cada save
+  // Guardamos los últimos N saves remotos exitosos como JSON para
+  // recuperación de emergencia desde DevTools.
+  const SNAPSHOT_HISTORY_KEY = `finpilot-backup-${usuarioId}`
+  const SNAPSHOT_HISTORY_LIMIT = 5
+  function pushLocalBackup(envelope: PersistedEnvelope<T>) {
+    try {
+      const raw = localStorage.getItem(SNAPSHOT_HISTORY_KEY)
+      const list: PersistedEnvelope<T>[] = raw ? JSON.parse(raw) : []
+      list.unshift(envelope)
+      localStorage.setItem(SNAPSHOT_HISTORY_KEY, JSON.stringify(list.slice(0, SNAPSHOT_HISTORY_LIMIT)))
+    } catch {
+      // si localStorage falla, no bloqueamos el flujo
+    }
+  }
 
   return {
     configured: true,
@@ -222,6 +504,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         debtPaymentsResult,
         monthClosuresResult,
         provisionsResult,
+        goalsResult,
       ] = await Promise.all([
         client.from(TABLES.settings).select('*').eq('usuario_id', usuarioId).maybeSingle(),
         client.from(TABLES.categories).select('*').eq('usuario_id', usuarioId).order('posicion', { ascending: true }),
@@ -239,6 +522,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         client.from(TABLES.debtPayments).select('*').eq('usuario_id', usuarioId).order('fecha_pago', { ascending: false }),
         client.from(TABLES.monthClosures).select('*').eq('usuario_id', usuarioId).order('mes', { ascending: false }),
         client.from(TABLES.provisions).select('*').eq('usuario_id', usuarioId).order('created_at', { ascending: false }),
+        client.from(TABLES.goals).select('*').eq('usuario_id', usuarioId).order('created_at', { ascending: false }),
       ])
 
       const results = [
@@ -258,6 +542,19 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
 
       const failed = results.find((result) => result.error)
       if (failed?.error) throw failed.error
+
+      // Goals es opcional: si la tabla no existe aún (migración pendiente),
+      // no rompemos la carga del resto de datos.
+      const goalsErrorMessage = String((goalsResult as any)?.error?.message ?? '')
+      const goalsTableMissing =
+        goalsErrorMessage.includes('relation') ||
+        goalsErrorMessage.includes('does not exist') ||
+        goalsErrorMessage.includes('Could not find') ||
+        goalsErrorMessage.includes('schema cache')
+      if (goalsResult.error && !goalsTableMissing) {
+        throw goalsResult.error
+      }
+      const goalsData = goalsTableMissing ? [] : (goalsResult.data ?? [])
 
       const categoryIdToName = new Map<string, Category>(
         (categoriesResult.data ?? []).map((row: any) => [row.id, row.nombre as Category]),
@@ -369,6 +666,21 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         active: Boolean(row.activa),
       }))
 
+      const goals: Goal[] = (goalsData as any[]).map((row: any) => ({
+        id: row.app_id,
+        name: row.nombre,
+        type: row.tipo as GoalType,
+        pocketId: pocketIdToAppId.get(row.bolsillo_id) ?? '',
+        targetAmount: toNumber(row.monto_objetivo),
+        targetDate: row.fecha_objetivo ?? undefined,
+        startDate: row.fecha_inicio,
+        icon: row.icono ?? '🎯',
+        color: row.color ?? '#7c3aed',
+        description: row.descripcion ?? undefined,
+        active: Boolean(row.activa),
+        completedAt: row.fecha_completada ?? undefined,
+      }))
+
       const state: Partial<AppState> = {
         pockets,
         expenses,
@@ -381,6 +693,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         learningRules,
         categories,
         provisions,
+        goals,
         config: settingsResult.data
           ? {
               pocketTypeLabels: {
@@ -405,10 +718,14 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         ...(debtsResult.data ?? []).map((row: any) => row.updated_at ?? row.created_at ?? null),
         ...(monthClosuresResult.data ?? []).map((row: any) => row.fecha_cierre ?? row.created_at ?? null),
         ...(provisionsResult.data ?? []).map((row: any) => row.updated_at ?? row.created_at ?? null),
+        ...(goalsData as any[]).map((row: any) => row.updated_at ?? row.created_at ?? null),
       ]
         .filter(Boolean)
         .sort()
         .at(-1)
+
+      // 🛡️ PROTECCIÓN 1: marcamos carga exitosa SOLO al llegar hasta aquí.
+      lastLoadSucceeded = true
 
       return {
         state: state as T,
@@ -416,9 +733,39 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       }
     },
     async save(envelope: PersistedEnvelope<T>) {
+      // 🛡️ PROTECCIÓN 1: si nunca cargamos exitosamente, bloqueamos cualquier save.
+      // Esto evita el escenario que destruyó tus datos antes:
+      //   load falla → state local vacío → save corre → borra todo en Supabase.
+      if (!lastLoadSucceeded) {
+        throw new Error(
+          'Save bloqueado: la carga inicial desde Supabase no ha completado todavía. ' +
+            'Refresca la página antes de continuar.',
+        )
+      }
+
       const client = getSupabaseClient()
       if (!client) throw new Error('Supabase no esta configurado.')
       const state = envelope.state as AppState
+
+      // ⚠️ SAFETY GUARD: si el state local está completamente vacío
+      // (probablemente porque una carga previa falló y cayó a initialState),
+      // NO debemos sobrescribir/borrar lo que esté en Supabase.
+      // Esto evita la pérdida masiva de datos.
+      const totalRecords =
+        (state.expenses?.length ?? 0) +
+        (state.incomes?.length ?? 0) +
+        (state.transfers?.length ?? 0) +
+        (state.fixedExpenses?.length ?? 0) +
+        (state.debts?.length ?? 0) +
+        (state.debtPayments?.length ?? 0) +
+        (state.monthClosures?.length ?? 0) +
+        (state.provisions?.length ?? 0) +
+        (state.goals?.length ?? 0)
+      if (totalRecords === 0) {
+        throw new Error(
+          'Save bloqueado: el estado local está vacío. Esto suele indicar una carga fallida — refresca antes de continuar.',
+        )
+      }
 
       const [
         existingCategoriesByName,
@@ -433,6 +780,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         existingObligationPayments,
         existingMonthClosures,
         existingProvisions,
+        existingGoals,
       ] = await Promise.all([
         fetchExistingCategories(usuarioId),
         fetchExistingAppIds(TABLES.pockets, usuarioId),
@@ -446,6 +794,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         fetchExistingAppIds(TABLES.obligationPayments, usuarioId),
         fetchExistingMonthClosures(usuarioId),
         fetchExistingAppIds(TABLES.provisions, usuarioId),
+        fetchExistingAppIdsOptional(TABLES.goals, usuarioId),
       ])
 
       const categoryRows = state.categories.map((rawName, index) => {
@@ -660,26 +1009,6 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       )
       await upsertRows(TABLES.monthClosures, monthClosureRows, 'usuario_id,mes')
 
-      await deleteRowsByAppId(
-        TABLES.obligationPayments,
-        usuarioId,
-        obligationPaymentRows.filter((row) => row.obligacion_id).map((row) => row.app_id),
-      )
-      await deleteRowsByAppId(
-        TABLES.debtPayments,
-        usuarioId,
-        debtPaymentRows.filter((row) => row.deuda_id).map((row) => row.app_id),
-      )
-      await deleteRowsByAppId(TABLES.transfers, usuarioId, transferRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.expenses, usuarioId, expenseRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.incomes, usuarioId, incomeRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.obligations, usuarioId, obligationRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.debts, usuarioId, debtRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.learningRules, usuarioId, learningRuleRows.map((row) => row.app_id))
-      await deleteMonthClosures(
-        usuarioId,
-        monthClosureRows.map((row) => row.mes),
-      )
       const provisionRows = (state.provisions ?? []).map((item) => ({
         id: existingProvisions.get(item.id) ?? crypto.randomUUID(),
         usuario_id: usuarioId,
@@ -691,10 +1020,53 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         updated_at: envelope.updatedAt,
       }))
 
+      const goalRows = (state.goals ?? []).map((item) => ({
+        id: existingGoals.get(item.id) ?? crypto.randomUUID(),
+        usuario_id: usuarioId,
+        app_id: item.id,
+        nombre: item.name,
+        tipo: item.type,
+        bolsillo_id: pocketAppIdToId.get(item.pocketId) ?? null,
+        monto_objetivo: item.targetAmount,
+        fecha_objetivo: item.type === 'fixed-term' ? item.targetDate ?? null : null,
+        fecha_inicio: item.startDate,
+        icono: item.icon,
+        color: item.color,
+        descripcion: item.description ?? null,
+        activa: item.active,
+        fecha_completada: item.completedAt ?? null,
+        updated_at: envelope.updatedAt,
+      }))
+
       await upsertRows(TABLES.provisions, provisionRows.filter((row) => row.bolsillo_id), 'usuario_id,app_id')
-      await deleteRowsByAppId(TABLES.provisions, usuarioId, provisionRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.categories, usuarioId, categoryRows.map((row) => row.app_id))
-      await deleteRowsByAppId(TABLES.pockets, usuarioId, pocketRows.map((row) => row.app_id))
+      await upsertRowsOptional(TABLES.goals, goalRows.filter((row) => row.bolsillo_id), 'usuario_id,app_id')
+
+      // 🛡️ REFACTOR ANTI PÉRDIDA DE DATOS:
+      // El save() YA NO hace deletes por diferencia para las entidades
+      // del usuario (gastos, ingresos, bolsillos, etc.). Esas filas solo
+      // se borran cuando la UI llama markEntityForRemoteDelete().
+      // Si el state local quedara vacío por bug, NADA se borra.
+      await processPendingDeletes(usuarioId)
+
+      // Los pagos automáticos y cierres son metadata DERIVADA del state
+      // (no los borra el usuario directamente), así que aquí seguimos
+      // reconciliando por diferencia — pero con los guards de borrado
+      // masivo (>50% bloqueado) de deleteRowsByAppId, así que tampoco
+      // pueden destruir todo aunque algo salga mal.
+      await deleteRowsByAppId(
+        TABLES.obligationPayments,
+        usuarioId,
+        obligationPaymentRows.filter((row) => row.obligacion_id).map((row) => row.app_id),
+      )
+      await deleteRowsByAppId(
+        TABLES.debtPayments,
+        usuarioId,
+        debtPaymentRows.filter((row) => row.deuda_id).map((row) => row.app_id),
+      )
+      await deleteMonthClosures(usuarioId, monthClosureRows.map((row) => row.mes))
+
+      // 🛡️ PROTECCIÓN 3: snapshot rotativo de respaldo después de cada save exitoso.
+      pushLocalBackup(envelope)
     },
   }
 }
