@@ -265,10 +265,6 @@ async function upsertRowsOptional(table: string, rows: any[], onConflict: string
   if (!tableMissing) throw error
 }
 
-async function deleteRowsByAppIdOptional(table: string, usuarioId: string, keepAppIds: string[]) {
-  // Delegamos al safe que ya incluye el guard de borrado masivo.
-  await deleteRowsByAppIdSafe(table, usuarioId, keepAppIds, { optional: true })
-}
 
 async function fetchExistingCategories(usuarioId: string) {
   const client = getSupabaseClient()
@@ -417,57 +413,10 @@ async function deleteMonthClosures(usuarioId: string, keepMonthKeys: string[]) {
   if (error) throw error
 }
 
-// Versión opcional con el mismo guard, para tablas que pueden no existir aún.
-async function deleteRowsByAppIdSafe(
-  table: string,
-  usuarioId: string,
-  keepAppIds: string[],
-  options: { optional?: boolean } = {},
-) {
-  const client = getSupabaseClient()
-  if (!client) throw new Error('Supabase no esta configurado.')
-  const { data, error: fetchError } = await client
-    .from(table)
-    .select('id, app_id')
-    .eq('usuario_id', usuarioId)
-  if (fetchError) {
-    const message = String((fetchError as any)?.message ?? '')
-    const tableMissing =
-      message.includes('relation') ||
-      message.includes('does not exist') ||
-      message.includes('Could not find') ||
-      message.includes('schema cache')
-    if (tableMissing && options.optional) return
-    throw fetchError
-  }
-  const rows = data ?? []
-  const idsToDelete = rows
-    .filter((row: any) => !keepAppIds.includes(row.app_id))
-    .map((row: any) => row.id)
-  if (!idsToDelete.length) return
-
-  if (
-    rows.length >= MAX_DELETE_ABSOLUTE_FLOOR &&
-    idsToDelete.length / rows.length > MAX_DELETE_RATIO
-  ) {
-    throw new Error(
-      `Borrado masivo bloqueado en tabla "${table}": ${idsToDelete.length} de ${rows.length}.`,
-    )
-  }
-
-  const { error } = await client.from(table).delete().in('id', idsToDelete)
-  if (error) throw error
-}
 
 export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): RemoteSnapshotDriver<T> | null {
   if (!usuarioId) return null
   if (!getSupabaseClient()) return null
-
-  // 🛡️ PROTECCIÓN 1: tracking de carga exitosa
-  // Si nunca se completó una carga exitosa, NO se permite ningún save.
-  // Esto evita que un load fallido (red, tabla faltante, etc.) deje el
-  // state local vacío y un save posterior borre todo en Supabase.
-  let lastLoadSucceeded = false
 
   // 🛡️ PROTECCIÓN 3: snapshot rotativo en localStorage antes de cada save
   // Guardamos los últimos N saves remotos exitosos como JSON para
@@ -724,48 +673,20 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         .sort()
         .at(-1)
 
-      // 🛡️ PROTECCIÓN 1: marcamos carga exitosa SOLO al llegar hasta aquí.
-      lastLoadSucceeded = true
-
       return {
         state: state as T,
         updatedAt: latest ?? new Date(0).toISOString(),
       }
     },
     async save(envelope: PersistedEnvelope<T>) {
-      // 🛡️ PROTECCIÓN 1: si nunca cargamos exitosamente, bloqueamos cualquier save.
-      // Esto evita el escenario que destruyó tus datos antes:
-      //   load falla → state local vacío → save corre → borra todo en Supabase.
-      if (!lastLoadSucceeded) {
-        throw new Error(
-          'Save bloqueado: la carga inicial desde Supabase no ha completado todavía. ' +
-            'Refresca la página antes de continuar.',
-        )
-      }
-
       const client = getSupabaseClient()
       if (!client) throw new Error('Supabase no esta configurado.')
       const state = envelope.state as AppState
 
-      // ⚠️ SAFETY GUARD: si el state local está completamente vacío
-      // (probablemente porque una carga previa falló y cayó a initialState),
-      // NO debemos sobrescribir/borrar lo que esté en Supabase.
-      // Esto evita la pérdida masiva de datos.
-      const totalRecords =
-        (state.expenses?.length ?? 0) +
-        (state.incomes?.length ?? 0) +
-        (state.transfers?.length ?? 0) +
-        (state.fixedExpenses?.length ?? 0) +
-        (state.debts?.length ?? 0) +
-        (state.debtPayments?.length ?? 0) +
-        (state.monthClosures?.length ?? 0) +
-        (state.provisions?.length ?? 0) +
-        (state.goals?.length ?? 0)
-      if (totalRecords === 0) {
-        throw new Error(
-          'Save bloqueado: el estado local está vacío. Esto suele indicar una carga fallida — refresca antes de continuar.',
-        )
-      }
+      // El save() ya no es destructivo: solo hace UPSERT para todas las
+      // entidades del usuario y procesa pending_deletes explícitos.
+      // Si el state local viniera vacío por algún bug, simplemente no
+      // se sube nada — los datos en Supabase quedan intactos.
 
       const [
         existingCategoriesByName,

@@ -187,10 +187,10 @@ export function usePersistentSnapshot<T>(options: {
     document.addEventListener('visibilitychange', pull)
 
     // El polling principal ahora es Supabase Realtime (suscripción WebSocket
-    // en App.tsx). Mantenemos un pull periódico cada 60s como red de
+    // en App.tsx). Mantenemos un pull periódico cada 10s como red de
     // seguridad por si la suscripción se desconecta sin notificar.
     if (pullTimerRef.current) window.clearInterval(pullTimerRef.current)
-    pullTimerRef.current = window.setInterval(pull, 60000)
+    pullTimerRef.current = window.setInterval(pull, 10000)
 
     return () => {
       window.removeEventListener('focus', pull)

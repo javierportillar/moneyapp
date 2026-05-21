@@ -861,6 +861,21 @@ function App() {
     remote: remoteDriver,
   })
 
+  // Aviso visible si hay errores de sync (saves fallando, etc.)
+  const lastSyncErrorRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!syncError) {
+      lastSyncErrorRef.current = null
+      return
+    }
+    if (syncError === lastSyncErrorRef.current) return
+    lastSyncErrorRef.current = syncError
+    // Solo mostramos notificación para errores reales (no para "Supabase no configurado" inicial)
+    if (!syncError.toLowerCase().includes('no esta configurado')) {
+      showUiNotice('Error de sincronización', syncError)
+    }
+  }, [syncError])
+
   // ─────────────── Supabase Realtime: sync instantáneo entre dispositivos ───────────────
   useEffect(() => {
     if (!auth.user?.id || !pullNow) return
@@ -901,7 +916,6 @@ function App() {
 
     tablesToWatch.forEach((table) => {
       channel.on(
-        // @ts-expect-error - tipo de postgres_changes no es exhaustivo
         'postgres_changes',
         {
           event: '*',
@@ -1434,20 +1448,6 @@ function App() {
     }
   }, [activeDebts, averagesLast6.avgIncome])
 
-  const savingsProjection = useMemo(() => {
-    const totalIncomes = state.incomes.reduce((sum, item) => sum + item.amount, 0)
-    const totalExpenses = state.expenses.reduce((sum, item) => sum + item.amount, 0)
-    const currentTotal = totalIncomes - totalExpenses
-    const series: Array<{ label: string; value: number }> = []
-    let runningTotal = currentTotal
-    series.push({ label: 'Hoy', value: runningTotal })
-    for (let i = 1; i <= 6; i++) {
-      runningTotal += averagesLast6.avgNet
-      const futureKey = getMonthKeyFromOffset(currentMonthKey, i)
-      series.push({ label: futureKey.slice(5), value: runningTotal })
-    }
-    return { series, currentTotal, projected6Months: runningTotal }
-  }, [state.incomes, state.expenses, averagesLast6.avgNet, currentMonthKey])
 
   const historicalBalanceSeries = useMemo(() => {
     let runningBalance = 0
