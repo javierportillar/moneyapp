@@ -45,6 +45,8 @@ import {
   moduleLabels,
   pocketIcons,
   STORAGE_KEY,
+  TAX_4X1000_CATEGORY,
+  TAX_4X1000_RATE,
   viewLabels,
 } from './domain/finance/constants'
 import type {
@@ -234,6 +236,39 @@ function predictCategory(description: string, rules: LearningRule[]) {
 
 function getPocketName(pockets: Pocket[], pocketId: string) {
   return pockets.find((pocket) => pocket.id === pocketId)?.name ?? 'Sin bolsillo'
+}
+
+/**
+ * Calcula el impuesto 4x1000 (0.4%) si el bolsillo lo tiene activado.
+ * Retorna 0 si no aplica. Redondea hacia arriba al peso.
+ */
+function compute4x1000(amount: number, pocket: Pocket | undefined): number {
+  if (!pocket?.taxes4x1000 || amount <= 0) return 0
+  return Math.ceil(amount * TAX_4X1000_RATE)
+}
+
+/**
+ * Construye un Expense que representa el cargo del 4x1000 asociado a una salida base.
+ */
+function build4x1000Expense(args: {
+  pocketId: string
+  taxAmount: number
+  date: string
+  time: string
+  baseDescription: string
+  source?: 'manual' | 'wallet' | 'fixed' | 'debt'
+}): Expense {
+  return {
+    id: crypto.randomUUID(),
+    description: `4x1000 · ${args.baseDescription}`,
+    amount: args.taxAmount,
+    pocketId: args.pocketId,
+    date: args.date,
+    time: args.time,
+    source: args.source ?? 'wallet',
+    category: TAX_4X1000_CATEGORY,
+    confidence: 1,
+  }
 }
 
 function getPocketMethod(pockets: Pocket[], pocketId: string) {
@@ -1124,6 +1159,7 @@ function App() {
     type: 'daily' as PocketType,
     color: '#0f766e',
     icon: '💼',
+    taxes4x1000: false,
   })
   const [categoryForm, setCategoryForm] = useState('')
   const [movementFilters, setMovementFilters] = useState<{
@@ -1515,6 +1551,7 @@ function App() {
 
       let monthlyContributionNeeded = 0
       let daysRemaining = 0
+      let monthsRemaining = 0
       let estimatedCompletionDate: string | undefined
       let isOnTrack = true
 
@@ -1524,10 +1561,25 @@ function App() {
           0,
           Math.floor((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)),
         )
-        const monthsRemaining = Math.max(1, daysRemaining / 30)
+
+        // 🧮 Cuota mensual sugerida: meses calendario reales (no días/30).
+        //
+        // Cuenta cuántos "ciclos mensuales completos" caben entre hoy y la
+        // fecha objetivo, INCLUYENDO el mes actual como oportunidad de aporte.
+        //
+        // Ejemplo: hoy 20 may, meta 15 nov → 6 cuotas (jun, jul, ago, sep, oct, nov).
+        //          hoy 20 may, meta 25 nov → 7 cuotas (incluye el mes actual también).
+        //          hoy 20 may, meta 5 jun  → 1 cuota (aporte único, ya no entra otro ciclo).
+        const yearDiff = targetDate.getFullYear() - todayDate.getFullYear()
+        const monthDiff = targetDate.getMonth() - todayDate.getMonth()
+        const calendarMonths = yearDiff * 12 + monthDiff
+        // Si el día objetivo ya pasó este mes ciclo, no cuenta como mes adicional
+        const dayAdjustment = targetDate.getDate() >= todayDate.getDate() ? 1 : 0
+        monthsRemaining = Math.max(1, calendarMonths + dayAdjustment)
+
         monthlyContributionNeeded = remaining / monthsRemaining
 
-        // ¿Vas bien?
+        // ¿Vas bien? (compara avance esperado proporcional al tiempo transcurrido)
         const expectedAccumulated =
           (goal.targetAmount * daysSinceStart) / (daysSinceStart + daysRemaining)
         isOnTrack = currentAmount >= expectedAccumulated * 0.9
@@ -1545,6 +1597,7 @@ function App() {
         isCompleted,
         daysSinceStart,
         daysRemaining,
+        monthsRemaining,
         monthlyContributionNeeded,
         estimatedCompletionDate,
         isOnTrack,
@@ -2622,7 +2675,7 @@ function App() {
   }
 
   function resetPocketForm() {
-    setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: '💼' })
+    setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: '💼', taxes4x1000: false })
   }
 
   function resetExpenseForm() {
@@ -2740,6 +2793,7 @@ function App() {
       type: pocket.type,
       color: pocket.color,
       icon: pocket.icon,
+      taxes4x1000: Boolean(pocket.taxes4x1000),
     })
   }
 
@@ -2903,7 +2957,8 @@ function App() {
     const isRetroactive = expenseDate.slice(0, 7) < currentMonthKey
 
     const pocketId = expenseForm.pocketId
-    const pocketName = getPocketName(state.pockets, pocketId)
+    const pocketObj = state.pockets.find((p) => p.id === pocketId)
+    const pocketName = pocketObj?.name ?? 'Sin bolsillo'
     const balances = computePocketBalances(state)
     const existingExpense = expenseForm.id
       ? state.expenses.find((item) => item.id === expenseForm.id)
@@ -2912,12 +2967,17 @@ function App() {
       (balances[pocketId] ?? 0) +
       (existingExpense && existingExpense.pocketId === pocketId ? existingExpense.amount : 0)
 
-    if (numericAmount > availableBalance) {
+    // Si es gasto NUEVO (no edición) y el bolsillo tiene 4x1000 → sumar al saldo requerido
+    const isNewExpense = !expenseForm.id
+    const taxAmount = isNewExpense ? compute4x1000(numericAmount, pocketObj) : 0
+    const totalRequired = numericAmount + taxAmount
+
+    if (totalRequired > availableBalance) {
       showUiNotice(
         'Saldo insuficiente',
-        `El bolsillo "${pocketName}" tiene ${money.format(
-          availableBalance,
-        )} disponibles y estás intentando registrar ${money.format(numericAmount)}.`,
+        taxAmount > 0
+          ? `El bolsillo "${pocketName}" tiene ${money.format(availableBalance)} disponibles. Necesitas ${money.format(totalRequired)} (incluye ${money.format(taxAmount)} de 4x1000).`
+          : `El bolsillo "${pocketName}" tiene ${money.format(availableBalance)} disponibles y estás intentando registrar ${money.format(numericAmount)}.`,
       )
       return
     }
@@ -2971,17 +3031,37 @@ function App() {
           }
         })
 
+        // Si aplica 4x1000, agregamos un segundo expense automático
+        const taxExpense =
+          taxAmount > 0
+            ? build4x1000Expense({
+                pocketId: expense.pocketId,
+                taxAmount,
+                date: expense.date,
+                time: expense.time ?? fallbackTime,
+                baseDescription: expense.description,
+              })
+            : null
+
+        const nextExpenses = expenseForm.id
+          ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
+          : [expense, ...current.expenses]
+
         return {
           ...current,
           learningRules,
-          expenses: expenseForm.id
-            ? current.expenses.map((item) => (item.id === expenseForm.id ? expense : item))
-            : [expense, ...current.expenses],
+          expenses: taxExpense ? [taxExpense, ...nextExpenses] : nextExpenses,
         }
         })
 
         resetExpenseForm()
         setOpenComposer(null)
+        if (taxAmount > 0) {
+          showUiNotice(
+            '4x1000 aplicado',
+            `Se descontó ${money.format(taxAmount)} adicional por impuesto del bolsillo "${pocketName}".`,
+          )
+        }
       } finally {
         endAction(actionKey)
       }
@@ -3064,7 +3144,8 @@ function App() {
 	    const fallbackTime = getCurrentTimeHHmm()
 	    const isRetroactive = transferDate.slice(0, 7) < currentMonthKey
     const fromPocketId = transferForm.fromPocketId
-    const fromPocketName = getPocketName(state.pockets, fromPocketId)
+    const fromPocketObj = state.pockets.find((p) => p.id === fromPocketId)
+    const fromPocketName = fromPocketObj?.name ?? 'Sin bolsillo'
     const transferBalances = computePocketBalances(state)
     const existingTransfer = transferForm.id
       ? state.transfers.find((item) => item.id === transferForm.id)
@@ -3073,12 +3154,17 @@ function App() {
       (transferBalances[fromPocketId] ?? 0) +
       (existingTransfer && existingTransfer.fromPocketId === fromPocketId ? existingTransfer.amount : 0)
 
-    if (numericAmount > transferAvailableBalance) {
+    // 4x1000 sobre transferencias salientes (solo cuando es NUEVA, no edición)
+    const isNewTransfer = !transferForm.id
+    const transferTaxAmount = isNewTransfer ? compute4x1000(numericAmount, fromPocketObj) : 0
+    const totalTransferRequired = numericAmount + transferTaxAmount
+
+    if (totalTransferRequired > transferAvailableBalance) {
       showUiNotice(
         'Saldo insuficiente',
-        `El bolsillo "${fromPocketName}" tiene ${money.format(
-          transferAvailableBalance,
-        )} disponibles y estás intentando transferir ${money.format(numericAmount)}.`,
+        transferTaxAmount > 0
+          ? `El bolsillo "${fromPocketName}" tiene ${money.format(transferAvailableBalance)} disponibles. Necesitas ${money.format(totalTransferRequired)} (incluye ${money.format(transferTaxAmount)} de 4x1000).`
+          : `El bolsillo "${fromPocketName}" tiene ${money.format(transferAvailableBalance)} disponibles y estás intentando transferir ${money.format(numericAmount)}.`,
       )
       return
     }
@@ -3101,16 +3187,34 @@ function App() {
 			          note: transferForm.note.trim(),
 			        }
 
+		        const taxExpense =
+		          transferTaxAmount > 0
+		            ? build4x1000Expense({
+		                pocketId: transfer.fromPocketId,
+		                taxAmount: transferTaxAmount,
+		                date: transfer.date,
+		                time: transfer.time ?? fallbackTime,
+		                baseDescription: `Transferencia ${transfer.note || 'interna'}`,
+		              })
+		            : null
+
 		        return {
 		          ...current,
 		          transfers: transferForm.id
 		            ? current.transfers.map((item) => (item.id === transferForm.id ? transfer : item))
 		            : [transfer, ...current.transfers],
+		          expenses: taxExpense ? [taxExpense, ...current.expenses] : current.expenses,
 		        }
 		      })
 
 		      resetTransferForm()
 		      setOpenComposer(null)
+		      if (transferTaxAmount > 0) {
+		        showUiNotice(
+		          '4x1000 aplicado',
+		          `Se descontó ${money.format(transferTaxAmount)} adicional por impuesto de la transferencia desde "${fromPocketName}".`,
+		        )
+		      }
 		      } finally {
 		        endAction(actionKey)
 		      }
@@ -3185,6 +3289,7 @@ function App() {
       color: pocketForm.color,
       icon: pocketForm.icon,
       type: pocketForm.type,
+      taxes4x1000: pocketForm.taxes4x1000,
     }
 
     const actionKey = pocketForm.id ? 'bolsillos:guardar' : 'bolsillos:crear'
@@ -4622,6 +4727,21 @@ function App() {
             <p>Saldo inicial {money.format(0)}</p>
           </div>
         </div>
+        <label className="provision-toggle-label" style={{ padding: '10px 0' }}>
+          <input
+            type="checkbox"
+            checked={pocketForm.taxes4x1000}
+            onChange={(event) =>
+              setPocketForm((current) => ({ ...current, taxes4x1000: event.target.checked }))
+            }
+          />
+          <span>
+            Aplicar 4x1000 (impuesto bancario)
+            <small style={{ display: 'block', color: 'rgba(148, 163, 184, 0.75)', marginTop: 2 }}>
+              Cada gasto o transferencia saliente generará un cargo automático de 0.4% por impuesto.
+            </small>
+          </span>
+        </label>
 	        <button type="submit" disabled={isPocketBusy}>
 	          {isPocketBusy
 	            ? pocketForm.id
@@ -7414,7 +7534,7 @@ function App() {
           >
             <div className="goals-stack">
               {activeGoals.map((data) => {
-                const { goal, currentAmount, progress, remaining, isCompleted, monthlyContributionNeeded, daysRemaining, isOnTrack, estimatedCompletionDate } = data
+                const { goal, currentAmount, progress, remaining, isCompleted, monthlyContributionNeeded, daysRemaining, monthsRemaining, isOnTrack, estimatedCompletionDate } = data
                 const pocket = state.pockets.find((p) => p.id === goal.pocketId)
                 const accentColor = goal.color
 
@@ -7490,8 +7610,11 @@ function App() {
                         {goal.type === 'fixed-term' && (
                           <>
                             <div className="goal-insight">
-                              <span>Cuota sugerida</span>
-                              <strong>{money.format(Math.ceil(monthlyContributionNeeded))}/mes</strong>
+                              <span>Cuota mensual</span>
+                              <strong>{money.format(Math.ceil(monthlyContributionNeeded))}</strong>
+                              <small className="goal-insight-hint">
+                                durante {monthsRemaining} {monthsRemaining === 1 ? 'mes' : 'meses'}
+                              </small>
                             </div>
                             <div className="goal-insight">
                               <span>Tiempo restante</span>

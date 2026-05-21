@@ -7580,6 +7580,14 @@ body {
   color: #fb7185;
 }
 
+.goal-insight-hint {
+  display: block;
+  font-size: 0.68rem;
+  color: rgba(148, 163, 184, 0.7);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
 /* Banner de completada */
 .goal-completion-banner {
   display: flex;

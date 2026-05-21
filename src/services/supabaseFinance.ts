@@ -522,6 +522,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         color: row.color,
         icon: row.icono,
         type: row.tipo as PocketType,
+        taxes4x1000: Boolean(row.cobra_4x1000),
       }))
 
       const expenses: Expense[] = (expensesResult.data ?? []).map((row: any) => ({
@@ -742,6 +743,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         color: item.color,
         icono: item.icon,
         tipo: item.type,
+        cobra_4x1000: Boolean(item.taxes4x1000),
         posicion: index,
         updated_at: envelope.updatedAt,
       }))
@@ -911,7 +913,9 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       if (settingsError) throw settingsError
 
       await upsertRows(TABLES.categories, categoryRows, 'usuario_id,app_id')
-      await upsertRows(TABLES.pockets, pocketRows, 'usuario_id,app_id')
+      // Usamos fallback porque la columna cobra_4x1000 puede no existir aún
+      // (migración pendiente). Si falla por esa columna, reintenta sin ella.
+      await upsertRowsWithFallback(TABLES.pockets, pocketRows, 'usuario_id,app_id', ['cobra_4x1000'])
       await upsertRows(TABLES.learningRules, learningRuleRows, 'usuario_id,app_id')
       await upsertRowsWithFallback(TABLES.incomes, incomeRows, 'usuario_id,app_id', ['hora'])
       await upsertRows(TABLES.obligations, obligationRows, 'usuario_id,app_id')

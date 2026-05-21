@@ -13,6 +13,8 @@ export type Pocket = {
   color: string
   icon: string
   type: PocketType
+  /** Si true, todo gasto/transferencia saliente genera un gasto adicional del 0.4% (4x1000). */
+  taxes4x1000?: boolean
 }
 
 export type Category = string

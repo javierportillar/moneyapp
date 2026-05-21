@@ -15,8 +15,14 @@ export const defaultCategories = [
   'Educacion',
   'Servicios',
   'Compras',
+  'Impuestos',
   'Otros',
 ] as const
+
+/** Categoría usada para los gastos automáticos del 4x1000. */
+export const TAX_4X1000_CATEGORY = 'Impuestos'
+/** Tasa del 4x1000: 0.4% (4 pesos por cada 1000). */
+export const TAX_4X1000_RATE = 0.004
 
 export const categoryKeywords: Record<string, string[]> = {
   Hogar: ['arriendo', 'renta', 'hogar', 'limpieza', 'ikea'],
