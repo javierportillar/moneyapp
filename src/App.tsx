@@ -43,12 +43,17 @@ import {
   defaultCategories,
   initialState,
   moduleLabels,
-  pocketIcons,
   STORAGE_KEY,
   TAX_4X1000_CATEGORY,
   TAX_4X1000_RATE,
   viewLabels,
 } from './domain/finance/constants'
+import {
+  availablePocketIconKeys,
+  getDefaultPocketIconKey,
+  PocketIcon,
+  pocketIconCatalog,
+} from './domain/pocketIcons'
 import type {
   AppConfig,
   AppState,
@@ -257,6 +262,8 @@ function build4x1000Expense(args: {
   time: string
   baseDescription: string
   source?: 'manual' | 'wallet' | 'fixed' | 'debt'
+  parentExpenseId?: string
+  parentTransferId?: string
 }): Expense {
   return {
     id: crypto.randomUUID(),
@@ -268,7 +275,152 @@ function build4x1000Expense(args: {
     source: args.source ?? 'wallet',
     category: TAX_4X1000_CATEGORY,
     confidence: 1,
+    parentExpenseId: args.parentExpenseId,
+    parentTransferId: args.parentTransferId,
   }
+}
+
+/**
+ * Picker visual de íconos lucide como POPOVER.
+ * - Botón principal compacto con el ícono actual + chevron.
+ * - Al hacer clic, se abre un panel flotante con búsqueda y grid agrupado.
+ * - Click fuera o seleccionar un ícono cierra el panel.
+ * - Soporta bolsillos legacy con emoji (PocketIcon hace fallback).
+ */
+function IconPicker({
+  value,
+  onChange,
+  label = 'Icono',
+  accentColor,
+}: {
+  value: string
+  onChange: (next: string) => void
+  label?: string
+  accentColor?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Cerrar al hacer click fuera
+  useEffect(() => {
+    if (!isOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isOpen])
+
+  // Cerrar con ESC
+  useEffect(() => {
+    if (!isOpen) return
+    function handleEsc(event: KeyboardEvent) {
+      if (event.key === 'Escape') setIsOpen(false)
+    }
+    document.addEventListener('keydown', handleEsc)
+    return () => document.removeEventListener('keydown', handleEsc)
+  }, [isOpen])
+
+  // Filtrar por búsqueda y agrupar
+  const filtered = query.trim()
+    ? pocketIconCatalog.filter((entry) =>
+        entry.label.toLowerCase().includes(query.toLowerCase()) ||
+        entry.group.toLowerCase().includes(query.toLowerCase()) ||
+        entry.key.toLowerCase().includes(query.toLowerCase()),
+      )
+    : pocketIconCatalog
+
+  const grouped = filtered.reduce<Record<string, typeof pocketIconCatalog>>((acc, entry) => {
+    acc[entry.group] = acc[entry.group] ?? []
+    acc[entry.group].push(entry)
+    return acc
+  }, {})
+
+  const currentEntry = pocketIconCatalog.find((e) => e.key === value)
+  const accentBg = accentColor ?? '#60a5fa'
+
+  return (
+    <div className="icon-picker-popover" ref={containerRef}>
+      <span className="icon-picker-label">{label}</span>
+      <button
+        type="button"
+        className={`icon-picker-trigger ${isOpen ? 'is-open' : ''}`}
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+      >
+        <span
+          className="icon-picker-trigger-icon"
+          style={{ background: accentBg, color: '#fff' }}
+        >
+          <PocketIcon name={value} size={20} />
+        </span>
+        <span className="icon-picker-trigger-text">
+          <strong>{currentEntry?.label ?? 'Seleccionar ícono'}</strong>
+          <small>Clic para cambiar</small>
+        </span>
+        <LuChevronDown
+          className={`icon-picker-trigger-chevron ${isOpen ? 'is-open' : ''}`}
+          size={18}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="icon-picker-panel" role="dialog" aria-label="Selector de íconos">
+          <div className="icon-picker-panel-head">
+            <input
+              type="text"
+              className="icon-picker-search"
+              placeholder="Buscar ícono..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="icon-picker-scroll">
+            {Object.entries(grouped).map(([group, entries]) => (
+              <div key={group} className="icon-picker-group">
+                <span className="icon-picker-group-label">{group}</span>
+                <div className="icon-picker-grid" role="listbox" aria-label={group}>
+                  {entries.map((entry) => {
+                    const isActive = entry.key === value
+                    return (
+                      <button
+                        key={entry.key}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        className={`icon-picker-chip ${isActive ? 'is-active' : ''}`}
+                        onClick={() => {
+                          onChange(entry.key)
+                          setIsOpen(false)
+                          setQuery('')
+                        }}
+                        title={entry.label}
+                        style={
+                          isActive
+                            ? { background: accentBg, color: '#fff', borderColor: accentBg }
+                            : undefined
+                        }
+                      >
+                        <entry.Icon size={20} />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <p className="empty-copy">No hay íconos que coincidan con "{query}".</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function getPocketMethod(pockets: Pocket[], pocketId: string) {
@@ -291,11 +443,8 @@ function getModuleSummary(module: ModuleKey) {
   return 'Crea y clasifica tus cuentas internas'
 }
 
-function getDefaultIcon(type: PocketType) {
-  if (type === 'daily') return '💼'
-  if (type === 'savings') return '🛡️'
-  if (type === 'fixed') return '🧾'
-  return '🎯'
+function getDefaultIcon(type: PocketType): string {
+  return getDefaultPocketIconKey(type)
 }
 
 function getViewIcon(view: ViewKey) {
@@ -1158,7 +1307,7 @@ function App() {
     name: '',
     type: 'daily' as PocketType,
     color: '#0f766e',
-    icon: '💼',
+    icon: 'wallet',
     taxes4x1000: false,
   })
   const [categoryForm, setCategoryForm] = useState('')
@@ -1190,6 +1339,10 @@ function App() {
   })
   const [debtPaymentDrafts, setDebtPaymentDrafts] = useState<Record<string, string>>({})
   const [openDebtPaymentId, setOpenDebtPaymentId] = useState<string | null>(null)
+  const [openGoalPaymentId, setOpenGoalPaymentId] = useState<string | null>(null)
+  const [goalPaymentDrafts, setGoalPaymentDrafts] = useState<
+    Record<string, { amount: string; fromPocketId: string }>
+  >({})
   const [provisionForm, setProvisionForm] = useState({
     id: '',
     name: '',
@@ -1198,7 +1351,7 @@ function App() {
     createNewPocket: false,
     newPocketName: '',
     newPocketColor: '#7c3aed',
-    newPocketIcon: '🎯',
+    newPocketIcon: 'target',
   })
   const [goalForm, setGoalForm] = useState({
     id: '',
@@ -1207,7 +1360,7 @@ function App() {
     pocketId: initialState.pockets[0].id,
     targetAmount: '',
     targetDate: '',
-    icon: '🎯',
+    icon: 'target',
     color: '#7c3aed',
     description: '',
     createNewPocket: false,
@@ -1454,8 +1607,13 @@ function App() {
     return Object.entries(buckets)
       .map(([pocketId, value]) => {
         const pocket = state.pockets.find((p) => p.id === pocketId)
+        // En charts solo podemos poner texto, sin componentes. Si el ícono es
+        // emoji legacy lo incluimos; si es key de lucide, solo el nombre.
+        const iconPrefix = pocket && !availablePocketIconKeys.includes(pocket.icon as any)
+          ? `${pocket.icon} `
+          : ''
         return {
-          label: pocket ? `${pocket.icon} ${pocket.name}` : 'Sin bolsillo',
+          label: pocket ? `${iconPrefix}${pocket.name}` : 'Sin bolsillo',
           value,
           subtitle: pocket?.name ?? undefined,
         }
@@ -1612,6 +1770,24 @@ function App() {
     [goalProgressList],
   )
 
+  // Bolsillos que están reservados a una meta activa.
+  // Su saldo se considera "apartado" y NO entra en el saldo total disponible.
+  const pocketsLockedByGoals = useMemo(() => {
+    const locked = new Set<string>()
+    activeGoals.forEach((data) => {
+      if (data.goal.pocketId) locked.add(data.goal.pocketId)
+    })
+    return locked
+  }, [activeGoals])
+
+  // Saldo disponible: suma de todos los bolsillos EXCEPTO los reservados a metas.
+  const availableCashTotal = useMemo(() => {
+    return Object.entries(pocketBalances).reduce(
+      (sum, [pocketId, value]) => (pocketsLockedByGoals.has(pocketId) ? sum : sum + value),
+      0,
+    )
+  }, [pocketBalances, pocketsLockedByGoals])
+
   // ─────────────── Análisis avanzado: KPIs diarios, comparativos, patrones, alertas ───────────────
   const currentMonthDate = new Date(`${currentMonthKey}-01T00:00:00`)
   const daysInCurrentMonth = new Date(
@@ -1653,7 +1829,8 @@ function App() {
 
   // KPI 1: Presupuesto disponible HOY
   const dailyBudget = useMemo(() => {
-    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    // Solo dinero NO reservado a metas
+    const totalCash = availableCashTotal
     const unpaidFixed = state.fixedExpenses
       .filter((item) => item.active && item.lastPaidMonth !== currentMonthKey)
       .reduce((sum, item) => sum + item.amount, 0)
@@ -1670,7 +1847,7 @@ function App() {
       perDay: Math.floor(available / daysRemainingInMonth),
       daysRemaining: daysRemainingInMonth,
     }
-  }, [pocketBalances, state.fixedExpenses, activeDebts, currentMonthKey, daysRemainingInMonth])
+  }, [availableCashTotal, state.fixedExpenses, activeDebts, currentMonthKey, daysRemainingInMonth])
 
   // KPI 2: Ritmo del mes
   const monthPace = useMemo(() => {
@@ -1702,9 +1879,9 @@ function App() {
     }
   }, [currentDay, daysInCurrentMonth, averagesLast6.avgExpense, currentMonthRealExpense])
 
-  // KPI 3: Runway (meses que aguantas sin ingresar)
+  // KPI 3: Runway (meses que aguantas sin ingresar) — solo cuenta dinero disponible, no apartado a metas
   const financialRunway = useMemo(() => {
-    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const totalCash = availableCashTotal
     const months = averagesLast6.avgExpense > 0 ? totalCash / averagesLast6.avgExpense : 0
     let status: 'good' | 'ok' | 'warn' | 'bad' = 'ok'
     if (months >= 6) status = 'good'
@@ -1712,7 +1889,7 @@ function App() {
     else if (months >= 1) status = 'warn'
     else status = 'bad'
     return { totalCash, months, status }
-  }, [pocketBalances, averagesLast6.avgExpense])
+  }, [availableCashTotal, averagesLast6.avgExpense])
 
   // KPI 4: Cobertura fondo de emergencia
   const emergencyFundCoverage = useMemo(() => {
@@ -1925,9 +2102,9 @@ function App() {
     return alerts.slice(0, 8)
   }, [categoryTrends, state.pockets, pocketBalances, state.fixedExpenses, currentMonthKey, currentDay, monthPace])
 
-  // Proyección con escenarios
+  // Proyección con escenarios — basada en dinero disponible (sin contar metas)
   const scenarioProjection = useMemo(() => {
-    const totalCash = Object.values(pocketBalances).reduce((sum, value) => sum + value, 0)
+    const totalCash = availableCashTotal
     const optimisticNet = averagesLast6.avgIncome * 1.05 - averagesLast6.avgExpense * 0.9
     const realisticNet = averagesLast6.avgNet
     const pessimisticNet = averagesLast6.avgIncome * 0.9 - averagesLast6.avgExpense * 1.15
@@ -1946,7 +2123,7 @@ function App() {
       series.push({ label: futureKey.slice(5), pesimista: p, realista: r, optimista: o })
     }
     return { series, currentTotal: totalCash, optimisticEnd: o, realisticEnd: r, pessimisticEnd: p }
-  }, [pocketBalances, averagesLast6.avgIncome, averagesLast6.avgExpense, averagesLast6.avgNet, currentMonthKey])
+  }, [availableCashTotal, averagesLast6.avgIncome, averagesLast6.avgExpense, averagesLast6.avgNet, currentMonthKey])
 
   const fixedStatus = useMemo(() => {
     const activeItems = state.fixedExpenses.filter((item) => item.active)
@@ -1996,7 +2173,8 @@ function App() {
   }, [fixedStatus.activeItems, fixedStatus.pending])
 
   const totals = useMemo(() => {
-    const pocketBalance = Object.values(pocketBalances).reduce((sum, balance) => sum + balance, 0)
+    // Saldo "disponible" (excluye bolsillos reservados a metas activas)
+    const pocketBalance = availableCashTotal
     const totalExpenses = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
     const totalIncomes = monthIncomes.reduce((sum, income) => sum + income.amount, 0)
     const previousExpenses = previousMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
@@ -2029,7 +2207,7 @@ function App() {
     fixedStatus.pending,
     monthExpenses,
     monthIncomes,
-    pocketBalances,
+    availableCashTotal,
     previousMonthExpenses,
     previousMonthIncomes,
     state.expenses,
@@ -2358,6 +2536,11 @@ function App() {
         const includeTo =
           (pocketId === 'todos' || transfer.toPocketId === pocketId) && matchesPocketType(transfer.toPocketId)
 
+        // 🛠 Si ambos lados están dentro del scope filtrado, la transferencia
+        // es INTERNA y no afecta el flujo neto: no la contamos como entrada
+        // ni como salida (evita inflar artificialmente los totales).
+        if (includeFrom && includeTo) return
+
         if (includeFrom) outflow += transfer.amount
         if (includeTo) inflow += transfer.amount
         return
@@ -2675,7 +2858,7 @@ function App() {
   }
 
   function resetPocketForm() {
-    setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: '💼', taxes4x1000: false })
+    setPocketForm({ id: '', name: '', type: 'daily', color: '#0f766e', icon: 'wallet', taxes4x1000: false })
   }
 
   function resetExpenseForm() {
@@ -2745,7 +2928,7 @@ function App() {
       createNewPocket: false,
       newPocketName: '',
       newPocketColor: '#7c3aed',
-      newPocketIcon: '🎯',
+      newPocketIcon: 'target',
     })
   }
 
@@ -2761,7 +2944,7 @@ function App() {
       createNewPocket: false,
       newPocketName: '',
       newPocketColor: '#7c3aed',
-      newPocketIcon: '🎯',
+      newPocketIcon: 'target',
     })
   }
 
@@ -2917,11 +3100,26 @@ function App() {
       else if (kind === 'ingreso') markEntityForRemoteDelete('income', movementId)
       else markEntityForRemoteDelete('transfer', movementId)
 
+      // 🧹 Cascada: si lo que se borra es un gasto o transferencia que generó
+      // un 4x1000 automático, también marcamos esos hijos para borrar.
+      if (kind === 'gasto') {
+        state.expenses
+          .filter((e) => e.parentExpenseId === movementId)
+          .forEach((child) => markEntityForRemoteDelete('expense', child.id))
+      } else if (kind === 'transferencia') {
+        state.expenses
+          .filter((e) => e.parentTransferId === movementId)
+          .forEach((child) => markEntityForRemoteDelete('expense', child.id))
+      }
+
       setState((current) => {
         if (kind === 'gasto') {
           return {
             ...current,
-            expenses: current.expenses.filter((item) => item.id !== movementId),
+            // Quita el gasto original y cualquier 4x1000 hijo
+            expenses: current.expenses.filter(
+              (item) => item.id !== movementId && item.parentExpenseId !== movementId,
+            ),
           }
         }
 
@@ -2935,6 +3133,8 @@ function App() {
         return {
           ...current,
           transfers: current.transfers.filter((item) => item.id !== movementId),
+          // Si la transferencia generó 4x1000, también lo quita
+          expenses: current.expenses.filter((item) => item.parentTransferId !== movementId),
         }
       })
 
@@ -3031,7 +3231,7 @@ function App() {
           }
         })
 
-        // Si aplica 4x1000, agregamos un segundo expense automático
+        // Si aplica 4x1000, agregamos un segundo expense automático vinculado al padre
         const taxExpense =
           taxAmount > 0
             ? build4x1000Expense({
@@ -3040,6 +3240,7 @@ function App() {
                 date: expense.date,
                 time: expense.time ?? fallbackTime,
                 baseDescription: expense.description,
+                parentExpenseId: expense.id,
               })
             : null
 
@@ -3195,6 +3396,7 @@ function App() {
 		                date: transfer.date,
 		                time: transfer.time ?? fallbackTime,
 		                baseDescription: `Transferencia ${transfer.note || 'interna'}`,
+		                parentTransferId: transfer.id,
 		              })
 		            : null
 
@@ -3531,7 +3733,7 @@ function App() {
       pocketId: state.pockets[0]?.id ?? initialState.pockets[0].id,
       targetAmount: '',
       targetDate: '',
-      icon: '🎯',
+      icon: 'target',
       color: '#7c3aed',
       description: '',
       createNewPocket: false,
@@ -3689,6 +3891,103 @@ function App() {
         item.id === goalId ? { ...item, active: true, completedAt: undefined } : item,
       ),
     }))
+  }
+
+  /**
+   * Registra un abono a una meta: crea una transferencia desde el bolsillo
+   * origen elegido hacia el bolsillo de la meta. Aplica 4x1000 si el origen
+   * tiene el impuesto activado.
+   */
+  function handleAbonarMeta(goalId: string) {
+    const goal = state.goals.find((item) => item.id === goalId)
+    if (!goal) return
+    const goalData = goalProgressList.find((item) => item.goal.id === goalId)
+
+    const draft = goalPaymentDrafts[goalId]
+    const suggested = goalData ? Math.ceil(goalData.monthlyContributionNeeded) : 0
+    const amount = Number(draft?.amount || suggested || 0)
+    const fromPocketId = draft?.fromPocketId || ''
+
+    if (!fromPocketId) {
+      showUiNotice('Falta bolsillo origen', 'Selecciona el bolsillo de donde sale el dinero.')
+      return
+    }
+    if (amount <= 0) {
+      showUiNotice('Monto inválido', 'Ingresa un monto mayor a 0.')
+      return
+    }
+    if (fromPocketId === goal.pocketId) {
+      showUiNotice('Bolsillos iguales', 'El bolsillo origen no puede ser el mismo de la meta.')
+      return
+    }
+
+    const fromPocket = state.pockets.find((p) => p.id === fromPocketId)
+    if (!fromPocket) return
+    const balances = computePocketBalances(state)
+    const availableBalance = balances[fromPocketId] ?? 0
+    const taxAmount = compute4x1000(amount, fromPocket)
+    const totalRequired = amount + taxAmount
+
+    if (totalRequired > availableBalance) {
+      showUiNotice(
+        'Saldo insuficiente',
+        taxAmount > 0
+          ? `"${fromPocket.name}" tiene ${money.format(availableBalance)}. Necesitas ${money.format(totalRequired)} (incluye ${money.format(taxAmount)} de 4x1000).`
+          : `"${fromPocket.name}" tiene ${money.format(availableBalance)} y estás intentando abonar ${money.format(amount)}.`,
+      )
+      return
+    }
+
+    const actionKey = `metas:abonar:${goalId}`
+    if (!beginAction(actionKey)) return
+    try {
+      const transferDate = today
+      const transferTime = getCurrentTimeHHmm()
+
+      setState((current) => {
+        const transfer: Transfer = {
+          id: crypto.randomUUID(),
+          fromPocketId,
+          toPocketId: goal.pocketId,
+          amount,
+          date: transferDate,
+          time: transferTime,
+          note: `Abono a meta: ${goal.name}`,
+        }
+
+        const taxExpense =
+          taxAmount > 0
+            ? build4x1000Expense({
+                pocketId: fromPocketId,
+                taxAmount,
+                date: transferDate,
+                time: transferTime,
+                baseDescription: `Abono a meta ${goal.name}`,
+                parentTransferId: transfer.id,
+              })
+            : null
+
+        return {
+          ...current,
+          transfers: [transfer, ...current.transfers],
+          expenses: taxExpense ? [taxExpense, ...current.expenses] : current.expenses,
+        }
+      })
+
+      setOpenGoalPaymentId(null)
+      setGoalPaymentDrafts((current) => ({
+        ...current,
+        [goalId]: { amount: '', fromPocketId: '' },
+      }))
+      showUiNotice(
+        'Abono registrado',
+        taxAmount > 0
+          ? `Se transfirieron ${money.format(amount)} a "${goal.name}" (+ ${money.format(taxAmount)} de 4x1000).`
+          : `Se transfirieron ${money.format(amount)} a "${goal.name}".`,
+      )
+    } finally {
+      endAction(actionKey)
+    }
   }
 
   function handleAddDebt(event: React.FormEvent<HTMLFormElement>) {
@@ -4668,18 +4967,43 @@ function App() {
 	    const isPocketBusy = Boolean(actionLoading[pocketActionKey])
 
 	    return (
-	      <form className="bank-form" onSubmit={handleAddPocket}>
-        <label>
-          Nombre del bolsillo
+	      <form className="bank-form pocket-form-redesigned" onSubmit={handleAddPocket}>
+        {/* Preview prominente arriba — refleja en tiempo real lo que se está editando */}
+        <div className="pocket-preview-hero" style={{ background: `linear-gradient(135deg, ${pocketForm.color}33, ${pocketForm.color}10)`, borderColor: `${pocketForm.color}55` }}>
+          <span
+            className="pocket-preview-hero-icon"
+            style={{ background: pocketForm.color }}
+          >
+            <PocketIcon name={pocketForm.icon} size={36} />
+          </span>
+          <div className="pocket-preview-hero-info">
+            <span className="pocket-preview-hero-type">
+              {pocketForm.type === 'daily' && 'Operación'}
+              {pocketForm.type === 'savings' && 'Ahorro'}
+              {pocketForm.type === 'fixed' && 'Pagos fijos'}
+              {pocketForm.type === 'invest' && 'Meta o inversión'}
+            </span>
+            <strong>{pocketForm.name || 'Nuevo bolsillo'}</strong>
+            {pocketForm.taxes4x1000 && (
+              <span className="pocket-preview-hero-tag">⚡ 4x1000 activo</span>
+            )}
+          </div>
+        </div>
+
+        {/* Campo nombre */}
+        <label className="field-block">
+          <span className="field-label">Nombre del bolsillo</span>
           <input
             value={pocketForm.name}
             onChange={(event) => setPocketForm((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Ej. emergencia, viajes, impuestos"
+            placeholder="Ej. Bancolombia, Nequi, Ahorros viaje"
           />
         </label>
-        <div className="form-grid three">
-          <label>
-            Tipo
+
+        {/* Tipo y Color en grid */}
+        <div className="form-grid two">
+          <label className="field-block">
+            <span className="field-label">Tipo</span>
             <select
               value={pocketForm.type}
               onChange={(event) =>
@@ -4690,44 +5014,34 @@ function App() {
                 }))
               }
             >
-              <option value="daily">Operacion</option>
+              <option value="daily">Operación</option>
               <option value="savings">Ahorro</option>
               <option value="fixed">Pagos fijos</option>
-              <option value="invest">Meta o inversion</option>
+              <option value="invest">Meta o inversión</option>
             </select>
           </label>
-          <label>
-            Color
-            <input
-              type="color"
-              value={pocketForm.color}
-              onChange={(event) => setPocketForm((current) => ({ ...current, color: event.target.value }))}
-            />
-          </label>
-          <label>
-            Icono
-            <select
-              value={pocketForm.icon}
-              onChange={(event) => setPocketForm((current) => ({ ...current, icon: event.target.value }))}
-            >
-              {pocketIcons.map((icon) => (
-                <option key={icon} value={icon}>
-                  {icon}
-                </option>
-              ))}
-            </select>
+          <label className="field-block">
+            <span className="field-label">Color</span>
+            <div className="color-input-wrap" style={{ borderColor: `${pocketForm.color}80` }}>
+              <input
+                type="color"
+                value={pocketForm.color}
+                onChange={(event) => setPocketForm((current) => ({ ...current, color: event.target.value }))}
+              />
+              <span className="color-input-hex">{pocketForm.color.toUpperCase()}</span>
+            </div>
           </label>
         </div>
-        <div className="pocket-preview">
-          <span className="icon-badge large" style={{ background: pocketForm.color }}>
-            {pocketForm.icon}
-          </span>
-          <div>
-            <strong>{pocketForm.name || 'Nuevo bolsillo'}</strong>
-            <p>Saldo inicial {money.format(0)}</p>
-          </div>
-        </div>
-        <label className="provision-toggle-label" style={{ padding: '10px 0' }}>
+
+        {/* Picker de ícono como popover */}
+        <IconPicker
+          value={pocketForm.icon}
+          onChange={(icon) => setPocketForm((current) => ({ ...current, icon }))}
+          accentColor={pocketForm.color}
+        />
+
+        {/* Switch del 4x1000 con mejor diseño */}
+        <label className="switch-card">
           <input
             type="checkbox"
             checked={pocketForm.taxes4x1000}
@@ -4735,44 +5049,46 @@ function App() {
               setPocketForm((current) => ({ ...current, taxes4x1000: event.target.checked }))
             }
           />
-          <span>
-            Aplicar 4x1000 (impuesto bancario)
-            <small style={{ display: 'block', color: 'rgba(148, 163, 184, 0.75)', marginTop: 2 }}>
-              Cada gasto o transferencia saliente generará un cargo automático de 0.4% por impuesto.
-            </small>
+          <span className="switch-card-body">
+            <strong>Aplicar 4x1000 (impuesto bancario)</strong>
+            <small>Cada gasto o transferencia saliente generará un cargo automático de 0.4% por impuesto.</small>
           </span>
         </label>
-	        <button type="submit" disabled={isPocketBusy}>
-	          {isPocketBusy
-	            ? pocketForm.id
-	              ? 'Guardando...'
-	              : 'Creando...'
-	            : pocketForm.id
-	              ? 'Guardar bolsillo'
-	              : 'Crear bolsillo'}
-	        </button>
-        {pocketForm.id && (
-          <div className="composer-action-row">
-            <button
-              type="button"
-              className="secondary-button delete-action"
-              disabled={Boolean(actionLoading[`bolsillos:eliminar:${pocketForm.id}`])}
-              onClick={() => handleDeletePocket(pocketForm.id)}
-            >
-              {actionLoading[`bolsillos:eliminar:${pocketForm.id}`] ? 'Eliminando...' : 'Eliminar bolsillo'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button cancel-action"
-              onClick={() => {
-                resetPocketForm()
-                setOpenComposer(null)
-              }}
-            >
-              Cancelar edicion
-            </button>
-          </div>
-        )}
+
+        {/* Acciones */}
+        <div className="pocket-form-actions">
+          <button type="submit" disabled={isPocketBusy} className="primary-action-button">
+            {isPocketBusy
+              ? pocketForm.id
+                ? 'Guardando...'
+                : 'Creando...'
+              : pocketForm.id
+                ? 'Guardar bolsillo'
+                : 'Crear bolsillo'}
+          </button>
+          {pocketForm.id && (
+            <div className="composer-action-row">
+              <button
+                type="button"
+                className="secondary-button delete-action"
+                disabled={Boolean(actionLoading[`bolsillos:eliminar:${pocketForm.id}`])}
+                onClick={() => handleDeletePocket(pocketForm.id)}
+              >
+                {actionLoading[`bolsillos:eliminar:${pocketForm.id}`] ? 'Eliminando...' : 'Eliminar'}
+              </button>
+              <button
+                type="button"
+                className="secondary-button cancel-action"
+                onClick={() => {
+                  resetPocketForm()
+                  setOpenComposer(null)
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
       </form>
     )
   }
@@ -5246,7 +5562,7 @@ function App() {
                   <article key={pocket.id} className="account-card">
                     <div className="account-card-top">
                       <span className="icon-badge" style={{ background: pocket.color }}>
-                        {pocket.icon}
+                        <PocketIcon name={pocket.icon} size={26} />
                       </span>
                       <span>{getPocketTypeLabel(pocket.type)}</span>
                     </div>
@@ -5419,7 +5735,7 @@ function App() {
                   <div className="account-card-top">
                     <div className="card-heading-inline">
                       <span className="icon-badge" style={{ background: pocket.color }}>
-                        {pocket.icon}
+                        <PocketIcon name={pocket.icon} size={26} />
                       </span>
                       <span>{getPocketTypeLabel(pocket.type)}</span>
                     </div>
@@ -7034,45 +7350,40 @@ function App() {
                   </label>
                 </div>
 
-                {provisionForm.createNewPocket ? (
-                  <div className="form-grid two">
-                    <label>
-                      Nombre del bolsillo
-                      <input
-                        value={provisionForm.newPocketName}
-                        onChange={(event) =>
-                          setProvisionForm((current) => ({ ...current, newPocketName: event.target.value }))
-                        }
-                        placeholder="Ej. Meta viaje Europa"
-                      />
-                    </label>
-                    <label>
-                      Icono
-                      <select
-                        value={provisionForm.newPocketIcon}
-                        onChange={(event) =>
-                          setProvisionForm((current) => ({ ...current, newPocketIcon: event.target.value }))
-                        }
-                      >
-                        {pocketIcons.map((icon) => (
-                          <option key={icon} value={icon}>
-                            {icon}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Color
-                      <input
-                        type="color"
-                        value={provisionForm.newPocketColor}
-                        onChange={(event) =>
-                          setProvisionForm((current) => ({ ...current, newPocketColor: event.target.value }))
-                        }
-                      />
-                    </label>
-                  </div>
-                ) : (
+                {provisionForm.createNewPocket && (
+                  <>
+                    <div className="form-grid two">
+                      <label>
+                        Nombre del bolsillo
+                        <input
+                          value={provisionForm.newPocketName}
+                          onChange={(event) =>
+                            setProvisionForm((current) => ({ ...current, newPocketName: event.target.value }))
+                          }
+                          placeholder="Ej. Meta viaje Europa"
+                        />
+                      </label>
+                      <label>
+                        Color
+                        <input
+                          type="color"
+                          value={provisionForm.newPocketColor}
+                          onChange={(event) =>
+                            setProvisionForm((current) => ({ ...current, newPocketColor: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <IconPicker
+                      value={provisionForm.newPocketIcon}
+                      onChange={(icon) =>
+                        setProvisionForm((current) => ({ ...current, newPocketIcon: icon }))
+                      }
+
+                    />
+                  </>
+                )}
+                {!provisionForm.createNewPocket && (
                   <label>
                     Bolsillo destino
                     <select
@@ -7083,7 +7394,7 @@ function App() {
                     >
                       {state.pockets.map((pocket) => (
                         <option key={pocket.id} value={pocket.id}>
-                          {pocket.icon} {pocket.name}
+                          {pocket.name}
                         </option>
                       ))}
                     </select>
@@ -7133,7 +7444,7 @@ function App() {
                       <div>
                         <div className="card-title-row">
                           <strong>
-                            {pocket?.icon && <span className="provision-pocket-icon">{pocket.icon}</span>}
+                            {pocket && <span className="provision-pocket-icon"><PocketIcon name={pocket.icon} size={16} /></span>}
                             {provision.name}
                           </strong>
                           <div className="provision-card-actions">
@@ -7219,7 +7530,7 @@ function App() {
                         <div>
                           <div className="card-title-row">
                             <strong>
-                              {pocket?.icon && <span className="provision-pocket-icon">{pocket.icon}</span>}
+                              {pocket && <span className="provision-pocket-icon"><PocketIcon name={pocket.icon} size={16} /></span>}
                               {provision.name}
                             </strong>
                             <button
@@ -7404,29 +7715,19 @@ function App() {
                   )}
                 </div>
 
-                <div className="form-grid two">
-                  <label>
-                    Icono
-                    <select
-                      value={goalForm.icon}
-                      onChange={(event) => setGoalForm((current) => ({ ...current, icon: event.target.value }))}
-                    >
-                      {pocketIcons.map((icon) => (
-                        <option key={icon} value={icon}>
-                          {icon}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Color
-                    <input
-                      type="color"
-                      value={goalForm.color}
-                      onChange={(event) => setGoalForm((current) => ({ ...current, color: event.target.value }))}
-                    />
-                  </label>
-                </div>
+                <label>
+                  Color
+                  <input
+                    type="color"
+                    value={goalForm.color}
+                    onChange={(event) => setGoalForm((current) => ({ ...current, color: event.target.value }))}
+                  />
+                </label>
+                <IconPicker
+                  value={goalForm.icon}
+                  onChange={(icon) => setGoalForm((current) => ({ ...current, icon }))}
+                  accentColor={goalForm.color}
+                />
 
                 <div className="provision-pocket-toggle">
                   <label className="provision-toggle-label">
@@ -7461,7 +7762,7 @@ function App() {
                     >
                       {state.pockets.map((pocket) => (
                         <option key={pocket.id} value={pocket.id}>
-                          {pocket.icon} {pocket.name}
+                          {pocket.name}
                         </option>
                       ))}
                     </select>
@@ -7547,7 +7848,7 @@ function App() {
                     <div className="goal-card-head">
                       <div className="goal-card-identity">
                         <span className="goal-icon" style={{ background: `${accentColor}22`, color: accentColor }}>
-                          {goal.icon}
+                          <PocketIcon name={goal.icon} size={24} />
                         </span>
                         <div>
                           <div className="card-title-row">
@@ -7657,6 +7958,126 @@ function App() {
                         </button>
                       </div>
                     )}
+
+                    {/* Botón de abono */}
+                    {!isCompleted && (
+                      <div className="goal-actions">
+                        <button
+                          type="button"
+                          className="action-trigger debt-trigger"
+                          onClick={() =>
+                            setOpenGoalPaymentId((current) => (current === goal.id ? null : goal.id))
+                          }
+                        >
+                          {openGoalPaymentId === goal.id ? 'Cancelar' : 'Abonar a esta meta'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Panel inline de abono */}
+                    {openGoalPaymentId === goal.id && !isCompleted && (
+                      <div className="goal-payment-panel">
+                        <div className="goal-payment-head">
+                          <div>
+                            <span className="micro-label">Registro de abono</span>
+                            <strong>Abona a "{goal.name}"</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="edit-icon-button inline"
+                            aria-label="Cerrar"
+                            onClick={() => setOpenGoalPaymentId(null)}
+                          >
+                            <LuX />
+                          </button>
+                        </div>
+                        <label>
+                          Monto a abonar
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={
+                              goalPaymentDrafts[goal.id]?.amount ??
+                              String(Math.ceil(monthlyContributionNeeded))
+                            }
+                            onChange={(event) =>
+                              setGoalPaymentDrafts((current) => ({
+                                ...current,
+                                [goal.id]: {
+                                  amount: keepOnlyDigits(event.target.value),
+                                  fromPocketId: current[goal.id]?.fromPocketId ?? '',
+                                },
+                              }))
+                            }
+                            placeholder={String(Math.ceil(monthlyContributionNeeded))}
+                          />
+                        </label>
+                        <label>
+                          Bolsillo origen
+                          <select
+                            value={goalPaymentDrafts[goal.id]?.fromPocketId ?? ''}
+                            onChange={(event) =>
+                              setGoalPaymentDrafts((current) => ({
+                                ...current,
+                                [goal.id]: {
+                                  amount: current[goal.id]?.amount ?? '',
+                                  fromPocketId: event.target.value,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">— Selecciona —</option>
+                            {state.pockets
+                              .filter((p) => p.id !== goal.pocketId)
+                              .map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} · disponible {money.format(pocketBalances[p.id] ?? 0)}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <p className="goal-payment-help">
+                          Cuota sugerida: {money.format(Math.ceil(monthlyContributionNeeded))}/mes.
+                          Puedes registrar un valor distinto.
+                          {(() => {
+                            const fp = state.pockets.find(
+                              (p) => p.id === goalPaymentDrafts[goal.id]?.fromPocketId,
+                            )
+                            if (!fp?.taxes4x1000) return null
+                            const amt = Number(
+                              goalPaymentDrafts[goal.id]?.amount ||
+                                Math.ceil(monthlyContributionNeeded),
+                            )
+                            const tax = compute4x1000(amt, fp)
+                            return tax > 0 ? (
+                              <span style={{ display: 'block', marginTop: 4, color: '#f59e0b' }}>
+                                Este bolsillo cobra 4x1000: se descontará {money.format(tax)} adicional.
+                              </span>
+                            ) : null
+                          })()}
+                        </p>
+                        <div className="goal-payment-actions">
+                          <button
+                            type="button"
+                            className="action-trigger debt-submit"
+                            disabled={Boolean(actionLoading[`metas:abonar:${goal.id}`])}
+                            onClick={() => handleAbonarMeta(goal.id)}
+                          >
+                            {actionLoading[`metas:abonar:${goal.id}`]
+                              ? 'Registrando...'
+                              : 'Confirmar abono'}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button slim"
+                            onClick={() => setOpenGoalPaymentId(null)}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </article>
                 )
               })}
@@ -7689,7 +8110,7 @@ function App() {
                               className="goal-icon"
                               style={{ background: `${goal.color}22`, color: goal.color }}
                             >
-                              {goal.icon}
+                              <PocketIcon name={goal.icon} size={22} />
                             </span>
                             <div>
                               <strong>{goal.name}</strong>
@@ -7758,8 +8179,9 @@ function App() {
                 .filter((g) => g.goal.type === 'fixed-term' && !g.isCompleted)
                 .map((data) => (
                   <div key={data.goal.id} className="review-chip">
-                    <span>
-                      {data.goal.icon} {data.goal.name}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <PocketIcon name={data.goal.icon} size={18} style={{ color: data.goal.color }} />
+                      {data.goal.name}
                       <small className="chip-meta">{data.daysRemaining} días restantes</small>
                     </span>
                     <strong>{money.format(Math.ceil(data.monthlyContributionNeeded))}</strong>

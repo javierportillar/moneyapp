@@ -29,6 +29,10 @@ export type Expense = {
   source: 'manual' | 'wallet' | 'fixed' | 'debt'
   category: Category
   confidence: number
+  /** Si este gasto es un 4x1000 generado automáticamente por otro gasto. */
+  parentExpenseId?: string
+  /** Si este gasto es un 4x1000 generado automáticamente por una transferencia. */
+  parentTransferId?: string
 }
 
 export type Debt = {

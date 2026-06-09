@@ -230,6 +230,20 @@ async function fetchExistingAppIds(table: string, usuarioId: string) {
   return new Map<string, string>((data ?? []).map((row: any) => [row.app_id, row.id]))
 }
 
+/** Trae app_id, id y nombre actual — usado para detectar reseteo de bolsillos. */
+async function fetchExistingPocketsFull(usuarioId: string) {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Supabase no esta configurado.')
+  const { data, error } = await client
+    .from(TABLES.pockets)
+    .select('id, app_id, nombre')
+    .eq('usuario_id', usuarioId)
+  if (error) throw error
+  return new Map<string, { id: string; nombre: string }>(
+    (data ?? []).map((row: any) => [row.app_id as string, { id: row.id as string, nombre: row.nombre as string }]),
+  )
+}
+
 async function fetchExistingAppIdsOptional(table: string, usuarioId: string) {
   // Igual que fetchExistingAppIds pero NO lanza si la tabla aún no existe en Supabase
   // (útil para migraciones pendientes sin romper el flujo principal).
@@ -535,6 +549,8 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         source: row.origen,
         category: categoryIdToName.get(row.categoria_id) ?? 'Otros',
         confidence: toNumber(row.confianza),
+        parentExpenseId: row.gasto_padre_app_id ?? undefined,
+        parentTransferId: row.transferencia_padre_app_id ?? undefined,
       }))
 
       const incomes: Income[] = (incomesResult.data ?? []).map((row: any) => ({
@@ -705,7 +721,7 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         existingGoals,
       ] = await Promise.all([
         fetchExistingCategories(usuarioId),
-        fetchExistingAppIds(TABLES.pockets, usuarioId),
+        fetchExistingPocketsFull(usuarioId),
         fetchExistingAppIds(TABLES.obligations, usuarioId),
         fetchExistingAppIds(TABLES.debts, usuarioId),
         fetchExistingAppIds(TABLES.expenses, usuarioId),
@@ -735,18 +751,39 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       })
       const categoryNameToId = new Map<string, string>(categoryRows.map((row) => [row.nombre, row.id]))
 
-      const pocketRows = state.pockets.map((item, index) => ({
-        id: existingPockets.get(item.id) ?? crypto.randomUUID(),
-        usuario_id: usuarioId,
-        app_id: item.id,
-        nombre: item.name,
-        color: item.color,
-        icono: item.icon,
-        tipo: item.type,
-        cobra_4x1000: Boolean(item.taxes4x1000),
-        posicion: index,
-        updated_at: envelope.updatedAt,
-      }))
+      // 🛡️ Protección contra reseteo de bolsillos:
+      // Si el state local tiene un bolsillo con el NOMBRE/ICONO DEFAULT del
+      // initialState (p1='Operacion', p2='Colchon', p3='Pagos fijos', p4='Meta viaje')
+      // y la BD ya tiene ese mismo app_id con un nombre custom diferente,
+      // preservamos el nombre/color/ícono de la BD. Esto evita que un state
+      // local "reseteado" pise los nombres reales del usuario.
+      const DEFAULT_POCKETS: Record<string, string> = {
+        p1: 'Operacion',
+        p2: 'Colchon',
+        p3: 'Pagos fijos',
+        p4: 'Meta viaje',
+      }
+      const pocketRows = state.pockets.map((item, index) => {
+        const existing = existingPockets.get(item.id)
+        const isDefaultId = item.id in DEFAULT_POCKETS
+        const isDefaultName = isDefaultId && DEFAULT_POCKETS[item.id] === item.name
+        const shouldPreserveServer =
+          existing && isDefaultName && existing.nombre !== item.name
+
+        return {
+          id: existing?.id ?? crypto.randomUUID(),
+          usuario_id: usuarioId,
+          app_id: item.id,
+          // Si detectamos un posible reseteo, conservamos el nombre actual del servidor
+          nombre: shouldPreserveServer ? existing!.nombre : item.name,
+          color: item.color,
+          icono: item.icon,
+          tipo: item.type,
+          cobra_4x1000: Boolean(item.taxes4x1000),
+          posicion: index,
+          updated_at: envelope.updatedAt,
+        }
+      })
       const pocketAppIdToId = new Map<string, string>(pocketRows.map((row) => [row.app_id, row.id]))
 
       const obligationRows = state.fixedExpenses.map((item) => ({
@@ -802,6 +839,8 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
         hora: normalizeTimeFromDb(item.time) ?? '00:00',
         origen: item.source,
         confianza: item.confidence,
+        gasto_padre_app_id: item.parentExpenseId ?? null,
+        transferencia_padre_app_id: item.parentTransferId ?? null,
         updated_at: envelope.updatedAt,
       }))
       const transferRows = state.transfers.map((item) => ({
@@ -920,7 +959,11 @@ export function createSupabaseFinanceDriver<T>(usuarioId?: string | null): Remot
       await upsertRowsWithFallback(TABLES.incomes, incomeRows, 'usuario_id,app_id', ['hora'])
       await upsertRows(TABLES.obligations, obligationRows, 'usuario_id,app_id')
       await upsertRows(TABLES.debts, debtRows, 'usuario_id,app_id')
-      await upsertRowsWithFallback(TABLES.expenses, expenseRows, 'usuario_id,app_id', ['hora'])
+      await upsertRowsWithFallback(TABLES.expenses, expenseRows, 'usuario_id,app_id', [
+        'hora',
+        'gasto_padre_app_id',
+        'transferencia_padre_app_id',
+      ])
       await upsertRowsWithFallback(TABLES.transfers, transferRows, 'usuario_id,app_id', ['hora'])
       await upsertRows(
         TABLES.obligationPayments,

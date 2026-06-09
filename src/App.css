@@ -505,26 +505,101 @@ body {
 }
 
 .icon-badge {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  display: inline-grid;
-  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   color: white;
-  font-size: 1rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  flex-shrink: 0;
+  display: inline-block;
+  /* Efecto 3D glossy estilo iOS/Material */
+  box-shadow:
+    inset 0 2px 1px rgba(255, 255, 255, 0.55),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 8px 16px rgba(0, 0, 0, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Capa de brillo glossy (gradient diagonal claro arriba → oscuro abajo) */
+.icon-badge::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.35) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(0, 0, 0, 0) 60%,
+    rgba(0, 0, 0, 0.25) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Reflejo curvo superior (highlight pulido como botón 3D) */
+.icon-badge::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 10%;
+  right: 10%;
+  height: 40%;
+  border-radius: 50% 50% 40% 40% / 60% 60% 40% 40%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 2;
+  filter: blur(0.5px);
+}
+
+/* ⭐ CENTRADO ABSOLUTO GARANTIZADO del SVG (no depende de flex/grid) */
+.icon-badge > svg,
+.icon-badge svg {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 3;
+  display: block;
+  stroke-width: 2.5;
+  filter:
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 0 1px rgba(0, 0, 0, 0.4));
+}
+
+/* También centrar emojis legacy (renderizados como span con fontSize) */
+.icon-badge > span {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .icon-badge.large {
-  width: 48px;
-  height: 48px;
-  font-size: 1.2rem;
-  border-radius: 16px;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+}
+
+.icon-badge.large svg {
+  stroke-width: 2.6;
 }
 
 .icon-badge.inline {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 10px;
   margin-right: 10px;
   vertical-align: middle;
@@ -3845,12 +3920,8 @@ body {
     inset 0 0 0 1px rgba(13, 92, 99, 0.08);
 }
 
-.icon-badge {
-  border-radius: 14px;
-  box-shadow:
-    0 14px 28px rgba(30, 41, 59, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.24);
-}
+/* Estilos extras del icon-badge en este contexto se manejan en la definición
+   principal arriba (efecto glossy). Sin overrides aquí. */
 
 .dashboard-grid {
   grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
@@ -7588,6 +7659,87 @@ body {
   line-height: 1.3;
 }
 
+/* Acciones y panel de abono */
+.goal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.goal-payment-panel {
+  margin-top: 10px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.08), rgba(167, 139, 250, 0.04));
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.goal-payment-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.goal-payment-head .micro-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(96, 165, 250, 0.95);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.goal-payment-head strong {
+  font-family: 'Space Grotesk', sans-serif;
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+
+.goal-payment-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.goal-payment-panel input,
+.goal-payment-panel select {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+.goal-payment-panel input:focus,
+.goal-payment-panel select:focus {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.goal-payment-help {
+  font-size: 0.75rem;
+  color: rgba(148, 163, 184, 0.85);
+  line-height: 1.5;
+}
+
+.goal-payment-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.goal-payment-actions button {
+  flex: 1 1 auto;
+}
+
 /* Banner de completada */
 .goal-completion-banner {
   display: flex;
@@ -7634,5 +7786,431 @@ body {
     flex-direction: column;
     align-items: stretch;
     text-align: center;
+  }
+}
+
+/* ─── Icon Picker · POPOVER (botón + panel flotante) ─────────────── */
+
+.icon-picker-popover {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.icon-picker-label {
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.85);
+  font-weight: 500;
+}
+
+.icon-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+  text-align: left;
+  width: 100%;
+}
+
+.icon-picker-trigger:hover,
+.icon-picker-trigger.is-open {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.icon-picker-trigger-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  color: white;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.icon-picker-trigger-icon svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+  stroke-width: 2.4;
+}
+
+.icon-picker-trigger-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.icon-picker-trigger-text strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.icon-picker-trigger-text small {
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 0.72rem;
+}
+
+.icon-picker-trigger-chevron {
+  color: rgba(148, 163, 184, 0.7);
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+
+.icon-picker-trigger-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+/* Panel flotante del picker */
+.icon-picker-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.5);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: pickerSlideIn 180ms ease-out;
+}
+
+@keyframes pickerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.icon-picker-panel-head {
+  padding: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.icon-picker-search {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 140ms ease;
+}
+
+.icon-picker-search:focus {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.icon-picker-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+}
+
+.icon-picker-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.icon-picker-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.icon-picker-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}
+
+.icon-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.icon-picker-group-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(148, 163, 184, 0.75);
+  padding-left: 2px;
+  font-weight: 600;
+}
+
+.icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 6px;
+}
+
+.icon-picker-chip {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 10px;
+  color: rgba(226, 232, 240, 0.8);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, color 140ms ease;
+  padding: 0;
+}
+
+.icon-picker-chip:hover {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.icon-picker-chip.is-active {
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+  transform: translateY(-1px);
+}
+
+.icon-picker-chip svg {
+  stroke-width: 2;
+}
+
+@media (max-width: 640px) {
+  .icon-picker-grid {
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  }
+
+  .icon-picker-scroll {
+    max-height: 280px;
+  }
+}
+
+/* ─── Form rediseñado de bolsillo ─────────────────────────── */
+
+.pocket-form-redesigned {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pocket-preview-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(167, 139, 250, 0.08));
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 18px;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.pocket-preview-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  color: white;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.pocket-preview-hero-icon svg {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  stroke-width: 2.4;
+}
+
+.pocket-preview-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pocket-preview-hero-type {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.7);
+  font-weight: 600;
+}
+
+.pocket-preview-hero-info strong {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.35rem;
+  color: #f8fafc;
+  line-height: 1.2;
+}
+
+.pocket-preview-hero-tag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 3px 9px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 999px;
+  color: #fbbf24;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* Bloques de campo más espaciados */
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.85);
+  font-weight: 500;
+}
+
+/* Color input con preview hex */
+.color-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  transition: border-color 160ms ease;
+}
+
+.color-input-wrap input[type='color'] {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.color-input-hex {
+  font-family: 'Space Grotesk', monospace;
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.9);
+  letter-spacing: 0.05em;
+}
+
+/* Switch card del 4x1000 */
+.switch-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.switch-card:hover {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.switch-card input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #60a5fa;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.switch-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.switch-card-body strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.switch-card-body small {
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.pocket-form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.primary-action-button {
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #60a5fa, #7c3aed);
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+  box-shadow: 0 8px 24px rgba(96, 165, 250, 0.3);
+}
+
+.primary-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 32px rgba(96, 165, 250, 0.4);
+}
+
+.primary-action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* (Estilos de icon-badge svg ahora viven en la definición glossy principal) */
+
+@media (max-width: 640px) {
+  .pocket-preview-hero {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .pocket-preview-hero-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 16px;
+  }
+
+  .pocket-preview-hero-info strong {
+    font-size: 1.15rem;
   }
 }

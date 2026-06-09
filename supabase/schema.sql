@@ -23,6 +23,8 @@ drop function if exists public.hash_token_sesion(text) cascade;
 drop function if exists public.generar_token_sesion() cascade;
 
 drop table if exists public.sesiones cascade;
+drop table if exists public.metas cascade;
+drop table if exists public.provisiones cascade;
 drop table if exists public.pagos_deudas cascade;
 drop table if exists public.pagos_obligaciones cascade;
 drop table if exists public.transferencias cascade;
@@ -125,6 +127,9 @@ create table public.bolsillos (
   tipo text not null check (tipo in ('daily', 'savings', 'fixed', 'invest')),
   posicion integer not null default 0,
   archivado boolean not null default false,
+  -- Si true, todo gasto/transferencia saliente desde este bolsillo genera
+  -- automáticamente un gasto adicional del 0.4% por concepto de 4x1000.
+  cobra_4x1000 boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (usuario_id, app_id)
@@ -194,6 +199,10 @@ create table public.gastos (
   hora text not null default '00:00' check (hora ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
   origen text not null check (origen in ('manual', 'wallet', 'fixed', 'debt')),
   confianza numeric(4,3) not null default 1 check (confianza between 0 and 1),
+  -- Si este gasto es un 4x1000 generado por otro gasto, referencia su app_id.
+  gasto_padre_app_id text,
+  -- Si este gasto es un 4x1000 generado por una transferencia, referencia su app_id.
+  transferencia_padre_app_id text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (usuario_id, app_id)
@@ -256,6 +265,45 @@ create table public.cierres_mensuales (
   unique (usuario_id, mes)
 );
 
+-- Provisiones: compromisos de ahorro mensuales recurrentes hacia un bolsillo.
+create table public.provisiones (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.usuarios (id) on delete cascade,
+  app_id text not null,
+  nombre text not null,
+  bolsillo_id uuid not null references public.bolsillos (id) on delete restrict,
+  monto_mensual numeric(14,2) not null check (monto_mensual > 0),
+  activa boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  unique (usuario_id, app_id)
+);
+
+-- Metas: objetivos de ahorro acumulativos (término fijo o indefinido) por bolsillo.
+create table public.metas (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.usuarios (id) on delete cascade,
+  app_id text not null,
+  nombre text not null,
+  tipo text not null check (tipo in ('fixed-term', 'indefinite')),
+  bolsillo_id uuid not null references public.bolsillos (id) on delete restrict,
+  monto_objetivo numeric(14,2) not null check (monto_objetivo > 0),
+  fecha_objetivo date,
+  fecha_inicio date not null default current_date,
+  icono text not null default '🎯',
+  color text not null default '#7c3aed',
+  descripcion text,
+  activa boolean not null default true,
+  fecha_completada timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  unique (usuario_id, app_id),
+  check (
+    (tipo = 'indefinite' and fecha_objetivo is null)
+    or (tipo = 'fixed-term' and fecha_objetivo is not null and fecha_objetivo >= fecha_inicio)
+  )
+);
+
 create index idx_sesiones_usuario on public.sesiones (usuario_id, expira_at) where revocada_at is null;
 create index idx_categorias_usuario on public.categorias (usuario_id, posicion, nombre);
 create index idx_reglas_aprendizaje_usuario on public.reglas_aprendizaje (usuario_id, palabra_clave);
@@ -268,6 +316,13 @@ create index idx_transferencias_usuario on public.transferencias (usuario_id, fe
 create index idx_pagos_obligaciones_usuario on public.pagos_obligaciones (usuario_id, fecha_pago desc);
 create index idx_pagos_deudas_usuario on public.pagos_deudas (usuario_id, fecha_pago desc);
 create index idx_cierres_mensuales_usuario on public.cierres_mensuales (usuario_id, mes desc);
+create index idx_provisiones_usuario on public.provisiones (usuario_id, activa);
+create index idx_metas_usuario on public.metas (usuario_id, activa, tipo);
+create index idx_metas_bolsillo on public.metas (bolsillo_id);
+create index idx_gastos_padre_gasto on public.gastos (usuario_id, gasto_padre_app_id)
+  where gasto_padre_app_id is not null;
+create index idx_gastos_padre_transferencia on public.gastos (usuario_id, transferencia_padre_app_id)
+  where transferencia_padre_app_id is not null;
 
 drop trigger if exists trg_usuarios_updated_at on public.usuarios;
 create trigger trg_usuarios_updated_at before update on public.usuarios for each row execute function public.set_updated_at();
@@ -298,6 +353,12 @@ create trigger trg_gastos_updated_at before update on public.gastos for each row
 
 drop trigger if exists trg_transferencias_updated_at on public.transferencias;
 create trigger trg_transferencias_updated_at before update on public.transferencias for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_provisiones_updated_at on public.provisiones;
+create trigger trg_provisiones_updated_at before update on public.provisiones for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_metas_updated_at on public.metas;
+create trigger trg_metas_updated_at before update on public.metas for each row execute function public.set_updated_at();
 
 create or replace function public.token_sesion_actual()
 returns text
@@ -527,6 +588,8 @@ grant select, insert, update, delete on table public.transferencias to anon, aut
 grant select, insert, update, delete on table public.pagos_obligaciones to anon, authenticated;
 grant select, insert, update, delete on table public.pagos_deudas to anon, authenticated;
 grant select, insert, update, delete on table public.cierres_mensuales to anon, authenticated;
+grant select, insert, update, delete on table public.provisiones to anon, authenticated;
+grant select, insert, update, delete on table public.metas to anon, authenticated;
 grant select on table public.movimientos to anon, authenticated;
 
 grant execute on function public.iniciar_sesion_simple(text, text) to anon, authenticated;
@@ -547,6 +610,8 @@ alter table public.transferencias enable row level security;
 alter table public.pagos_obligaciones enable row level security;
 alter table public.pagos_deudas enable row level security;
 alter table public.cierres_mensuales enable row level security;
+alter table public.provisiones enable row level security;
+alter table public.metas enable row level security;
 alter table public.sesiones enable row level security;
 
 create policy usuarios_select_propios_o_admin on public.usuarios
@@ -629,7 +694,60 @@ for all
 using (usuario_id = public.usuario_actual_id() or public.es_admin_actual())
 with check (usuario_id = public.usuario_actual_id() or public.es_admin_actual());
 
+create policy provisiones_owner_all on public.provisiones
+for all
+using (usuario_id = public.usuario_actual_id() or public.es_admin_actual())
+with check (usuario_id = public.usuario_actual_id() or public.es_admin_actual());
+
+create policy metas_owner_all on public.metas
+for all
+using (usuario_id = public.usuario_actual_id() or public.es_admin_actual())
+with check (usuario_id = public.usuario_actual_id() or public.es_admin_actual());
+
 create policy sesiones_sin_acceso_directo on public.sesiones
 for all
 using (false)
 with check (false);
+
+-- ─────────────────────────────────────────────────────────────────
+-- Supabase Realtime: habilita propagación instantánea de cambios
+-- entre dispositivos vía WebSocket.
+-- ─────────────────────────────────────────────────────────────────
+
+do $$
+declare
+  t text;
+  tablas text[] := array[
+    'bolsillos',
+    'gastos',
+    'ingresos',
+    'transferencias',
+    'obligaciones',
+    'deudas',
+    'pagos_obligaciones',
+    'pagos_deudas',
+    'cierres_mensuales',
+    'categorias',
+    'reglas_aprendizaje',
+    'provisiones',
+    'metas',
+    'configuracion'
+  ];
+begin
+  foreach t in array tablas loop
+    if exists (
+      select 1 from information_schema.tables
+      where table_schema = 'public' and table_name = t
+    ) then
+      if not exists (
+        select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime'
+          and schemaname = 'public'
+          and tablename = t
+      ) then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+      execute format('alter table public.%I replica identity full', t);
+    end if;
+  end loop;
+end $$;

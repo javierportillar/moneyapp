@@ -1,7 +1,42 @@
 import type { AppState, ModuleKey, ViewKey } from './types'
 
 export const STORAGE_KEY = 'finpilot-v2'
-export const pocketIcons = ['💼', '🏠', '🛒', '💳', '🧾', '🎯', '✈️', '🛡️', '📈', '💰']
+
+/**
+ * Set generoso de íconos para bolsillos / provisiones / metas.
+ * Organizados por temática para que el usuario encuentre el que mejor
+ * represente el propósito de su bolsillo.
+ */
+export const pocketIcons = [
+  // Dinero / banca
+  '💼', '💰', '💵', '💴', '💶', '💷', '🪙', '💳', '🏦', '💸', '🤑', '💎',
+  // Hogar
+  '🏠', '🏡', '🛋️', '🛏️', '🔑', '🧾',
+  // Comida y bebida
+  '🛒', '🍔', '🍕', '🍣', '🍱', '☕', '🍷', '🍺', '🥗', '🍰',
+  // Transporte
+  '🚗', '🚕', '🚙', '🚌', '🛵', '🚲', '⛽', '🚀', '🚂', '🛻',
+  // Viajes
+  '✈️', '🌍', '🏖️', '🏔️', '🗺️', '🎒', '🏨', '🌴', '🏝️', '🎫',
+  // Salud
+  '💊', '🏥', '🩺', '🧘', '🏋️',
+  // Educación
+  '📚', '🎓', '📖', '🖊️', '🎒',
+  // Entretenimiento
+  '🎬', '🎮', '🎵', '🎸', '🎤', '📺', '🎨', '🎭', '🎲', '🎳',
+  // Tecnología / suscripciones
+  '📱', '💻', '🖥️', '⌨️', '🎧', '📷', '🖨️',
+  // Servicios / facturas
+  '💡', '🔌', '🚰', '📡', '📞', '📶',
+  // Compras / moda
+  '🛍️', '👕', '👟', '👜', '💄', '⌚',
+  // Mascotas / familia / regalos
+  '🐶', '🐱', '🐾', '👶', '🎁', '🎉', '💝',
+  // Ahorro / metas / éxito
+  '🎯', '🏆', '🛡️', '📈', '📊', '⭐', '🌟', '🔥', '✨', '🚦',
+  // Cuentas específicas comunes
+  '🏧', '📥', '📤', '🧮', '💹', '🪪',
+]
 
 export const defaultCategories = [
   'Hogar',
@@ -41,10 +76,10 @@ export const categoryKeywords: Record<string, string[]> = {
 
 export const initialState: AppState = {
   pockets: [
-    { id: 'p1', name: 'Operacion', balance: 0, color: '#0f766e', icon: '💼', type: 'daily' },
-    { id: 'p2', name: 'Colchon', balance: 0, color: '#1d4ed8', icon: '🛡️', type: 'savings' },
-    { id: 'p3', name: 'Pagos fijos', balance: 0, color: '#f59e0b', icon: '🧾', type: 'fixed' },
-    { id: 'p4', name: 'Meta viaje', balance: 0, color: '#7c3aed', icon: '✈️', type: 'invest' },
+    { id: 'p1', name: 'Operacion', balance: 0, color: '#0f766e', icon: 'wallet', type: 'daily' },
+    { id: 'p2', name: 'Colchon', balance: 0, color: '#1d4ed8', icon: 'shield', type: 'savings' },
+    { id: 'p3', name: 'Pagos fijos', balance: 0, color: '#f59e0b', icon: 'receipt', type: 'fixed' },
+    { id: 'p4', name: 'Meta viaje', balance: 0, color: '#7c3aed', icon: 'plane', type: 'invest' },
   ],
   fixedExpenses: [],
   debts: [],
